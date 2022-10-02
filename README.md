@@ -1,3 +1,4 @@
 # RiskMap
-videos comming in three weeks.
-source code will be published after review. 
+Images and videos comming in three weeks.
+
+Source code will be published after review. 
