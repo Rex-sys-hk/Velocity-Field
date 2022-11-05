@@ -1,5 +1,53 @@
-[INFO 11-05 11:58:58] ------------- DIPP -------------
-[INFO 11-05 11:58:58] Batch size: 180
-[INFO 11-05 11:58:58] Learning rate: 0.0002
-[INFO 11-05 11:58:58] Use integrated planning module: True
-[INFO 11-05 11:58:58] Use device: cuda
+[INFO 11-05 20:24:53] ------------- DIPP -------------
+[INFO 11-05 20:24:53] Batch size: 180
+[INFO 11-05 20:24:53] Learning rate: 0.0002
+[INFO 11-05 20:24:53] Use integrated planning module: True
+[INFO 11-05 20:24:53] Use device: cuda
+[INFO 11-05 20:24:53] Added key: store_based_barrier_key:1 to store for rank: 0
+[INFO 11-05 20:25:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:25:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:25:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:25:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:25:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:25:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:26:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:27:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:28:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:29:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:30:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:31:53] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:32:03] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:32:13] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:32:23] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:32:33] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:32:43] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)

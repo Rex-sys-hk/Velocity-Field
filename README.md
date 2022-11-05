@@ -71,7 +71,7 @@ python train.py \
 ```
 python -m torch.distributed.launch
 ```
-OMP_NUM_THREADS=24 \
+OMP_NUM_THREADS=48 \
 torchrun \
 --nproc_per_node=2 \
 --nnodes=2 \
@@ -85,15 +85,37 @@ train.py \
 --use_planning \
 --seed 3407 \
 --num_workers 48 \
---pretrain_epochs 5 \
---train_epochs 20 \
+--pretrain_epochs 1 \
+--train_epochs 2 \
 --batch_size 180 \
 --learning_rate 2e-4 \
 --device cuda
 ```
 0: 10.30.9.51
+1: 10.30.8.250
+2: 10.30.10.63
 3: 10.30.9.88
-
+```
+OMP_NUM_THREADS=24 \
+torchrun \
+--nproc_per_node=4 \
+--nnodes=2 \
+--node_rank=x \
+--master_addr="10.30.x.x" \
+--master_port=7891 \
+train.py \
+--name DIPP \
+--train_set /mnt/processed \
+--valid_set /mnt/validate \
+--use_planning \
+--seed 3407 \
+--num_workers 24 \
+--pretrain_epochs 1 \
+--train_epochs 1 \
+--batch_size 120 \
+--learning_rate 2e-4 \
+--device cuda
+```
 
 
 ### Open-loop testing
