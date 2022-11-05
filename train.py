@@ -180,26 +180,32 @@ def model_training():
     logging.info("Use device: {}".format(args.device))
 
     # torch.cuda.set_device(args.local_rank)
-    world_size = -1
-    try:
-        args.local_rank = int(os.environ["LOCAL_RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-    except:
-        print("failed to get env V")
-        pass
+    # world_size = None
+    # try:
+    #     args.local_rank = int(os.environ["LOCAL_RANK"])
+    #     world_size = int(os.environ["WORLD_SIZE"])
+    #     print("world_size:",world_size)
+
+    # except:
+    #     print("failed to get env V")
+    #     pass
     # set seed
     set_seed(args.seed+args.local_rank)
-    server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
-    client_store = dist.TCPStore("10.30.9.51",7891,None,True,timedelta(seconds=30),False)
+    # server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
+    # client_store = dist.TCPStore("10.30.9.51",7891,None,False,timedelta(seconds=30),False)
+    print("WTF0")
+
     dist.init_process_group(
                             backend='nccl',
-                            # init_method='tcp://127.0.0.1:7891',
-                            store= server_store,
+                            init_method='tcp://127.0.0.1:7891',
+                            # store= server_store,
                             rank=args.local_rank,
-                            world_size = world_size)
+                            world_size = args.world_size)
+    print("WTF")
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
     predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
+    print("WTF1")
     
     # set up planner
     if args.use_planning:
@@ -212,6 +218,7 @@ def model_training():
     if args.ckpt:
         map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
         predictor.load_state_dict(torch.load(args.ckpt,map_location = map_location)) 
+    print("WTF2")
     
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
@@ -220,6 +227,7 @@ def model_training():
     # training parameters
     train_epochs = args.train_epochs
     batch_size = args.batch_size
+    print("WTF3")
     
     # set up data loaders
     train_set = DrivingData(args.train_set+'/*')
@@ -230,6 +238,8 @@ def model_training():
     valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
     # train_loader = DataLoader(train_set, batch_size=batch_size, shuffle = True, num_workers=args.num_workers)
     # valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle = False, num_workers=args.num_workers)
+    print("WTF4")
+
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     
     # begin training
@@ -289,7 +299,9 @@ if __name__ == "__main__":
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     parser.add_argument('--ckpt', type=str, default=None)
-    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--local_rank", type=int, default=-1)
+    parser.add_argument("--world_size", type=int, default=-1)
+
     args = parser.parse_args()
 
     # Run
