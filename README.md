@@ -118,7 +118,9 @@ train.py \
 --train_epochs 1 \
 --batch_size 120 \
 --learning_rate 2e-4 \
---device cuda
+--device cuda \
+--local_rank 0 \
+--world_size 2
 ```
 
 

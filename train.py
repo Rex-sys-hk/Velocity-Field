@@ -197,7 +197,8 @@ def model_training():
 
     dist.init_process_group(
                             backend='nccl',
-                            init_method='tcp://127.0.0.1:7891',
+                            # init_method='tcp://10.30.9.51:7891',
+                            init_method='tcp://10.13.164.207:666',
                             # store= server_store,
                             rank=args.local_rank,
                             world_size = args.world_size)

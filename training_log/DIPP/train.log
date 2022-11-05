@@ -1,7 +1,5 @@
-[INFO 11-06 00:00:17] ------------- DIPP -------------
-[INFO 11-06 00:00:17] Batch size: 120
-[INFO 11-06 00:00:17] Learning rate: 0.0002
-[INFO 11-06 00:00:17] Use integrated planning module: True
-[INFO 11-06 00:00:17] Use device: cuda
-[INFO 11-06 00:00:17] Added key: store_based_barrier_key:1 to store for rank: 1
-[INFO 11-06 00:00:17] Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 6 nodes.
+[INFO 11-06 01:22:29] ------------- DIPP -------------
+[INFO 11-06 01:22:29] Batch size: 120
+[INFO 11-06 01:22:29] Learning rate: 0.0002
+[INFO 11-06 01:22:29] Use integrated planning module: True
+[INFO 11-06 01:22:29] Use device: cuda
