@@ -182,21 +182,22 @@ def model_training():
 
     args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else args.local_rank
     args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
-
+    print(args.local_rank,args.world_size)
     set_seed(args.seed+args.local_rank)
     # server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
     # client_store = dist.TCPStore("10.30.9.51",7891,None,False,timedelta(seconds=30),False)
     dist.init_process_group(
                             backend="nccl",
-                            init_method='tcp://10.13.164.207:7891',
-                            # # store= server_store,
-                            rank=args.local_rank,
-                            world_size = args.world_size
+                            # init_method='tcp://10.13.164.207:7891',
+                            # # # store= server_store,
+                            # rank=args.local_rank,
+                            # world_size = args.world_size
                             )
     print('3')
                             
     # set up predictor
-    predictor = Predictor(50).to(args.local_rank)
+    # predictor = Predictor(50).to(args.local_rank)
+    predictor = torch.nn.Linear(20,10).to(args.local_rank)
     # predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
     predictor = DDP(
                     predictor,
@@ -205,7 +206,7 @@ def model_training():
                     find_unused_parameters=True
                     )
 
-    
+    print(4)
     # set up planner
     if args.use_planning:
         trajectory_len, feature_len = 50, 9
@@ -300,10 +301,8 @@ if __name__ == "__main__":
     parser.add_argument("--world_size", type=int, default=-1)
 
     args = parser.parse_args()
-    os.environ["MASTER_ADDR"] = "10.13.164.207"
-    os.environ["MASTER_PORT"] = "7891"
-    os.environ["NCCL_DEBUG"] = "INFO"
-    os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
-    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+    # os.environ["NCCL_DEBUG"] = "INFO"
+    # os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
+    # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     # Run
     model_training()
