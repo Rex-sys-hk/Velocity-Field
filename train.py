@@ -181,6 +181,7 @@ def model_training():
     # set seed
     set_seed(args.seed)
     # torch.cuda.set_device(args.local_rank)
+    args.local_rank = int(os.environ["LOCAL_RANK"])
     dist.init_process_group(backend='nccl',rank=args.local_rank)
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
