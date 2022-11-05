@@ -71,7 +71,14 @@ python train.py \
 ```
 python -m torch.distributed.launch
 ```
-OMP_NUM_THREADS=48 \
+0: 10.30.9.51
+1: 10.30.8.250
+2: 10.30.10.63
+3: 10.30.9.88
+```
+
+```
+OMP_NUM_THREADS=1 \
 torchrun \
 --nproc_per_node=2 \
 --nnodes=2 \
@@ -91,12 +98,9 @@ train.py \
 --learning_rate 2e-4 \
 --device cuda
 ```
-0: 10.30.9.51
-1: 10.30.8.250
-2: 10.30.10.63
-3: 10.30.9.88
+
 ```
-OMP_NUM_THREADS=24 \
+OMP_NUM_THREADS=1 \
 torchrun \
 --nproc_per_node=4 \
 --nnodes=2 \

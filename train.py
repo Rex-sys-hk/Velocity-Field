@@ -86,7 +86,7 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
     if args.local_rank==0 and use_planning and it%100==0:
         torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{it}.pth')
         logging.info(f"Model saved in training_log/{args.name}\n")    
-        dist.barrier()
+    dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
@@ -182,7 +182,7 @@ def model_training():
     set_seed(args.seed)
     # torch.cuda.set_device(args.local_rank)
     args.local_rank = int(os.environ["LOCAL_RANK"])
-    dist.init_process_group(backend='nccl',rank=args.local_rank)
+    dist.init_process_group(backend='nccl')
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
     predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
@@ -256,6 +256,7 @@ def model_training():
             torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth')
             logging.info(f"Model saved in training_log/{args.name}\n")    
         dist.barrier()
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     # Arguments
