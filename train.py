@@ -193,8 +193,15 @@ def model_training():
                             rank=args.local_rank,
                             world_size = args.world_size)
     # set up predictor
-    predictor = Predictor(50).to(args.local_rank)
-    predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
+    predictor = Predictor(50)#.to(args.local_rank)
+    # predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
+    predictor = DDP(
+                    predictor,
+                    device_ids=[args.local_rank],
+                    output_device=args.local_rank,
+                    find_unused_parameters=True
+                    )
+
     
     # set up planner
     if args.use_planning:
