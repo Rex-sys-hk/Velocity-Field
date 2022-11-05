@@ -1,0 +1,6 @@
+processed/
+validate/
+.vscode/
+*.pth
+dataset/
+*.pyc

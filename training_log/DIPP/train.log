@@ -1,0 +1,10 @@
+[INFO 11-05 08:55:11] ------------- DIPP -------------
+[INFO 11-05 08:55:11] Batch size: 120
+[INFO 11-05 08:55:11] Learning rate: 0.0002
+[INFO 11-05 08:55:11] Use integrated planning module: True
+[INFO 11-05 08:55:11] Use device: cuda
+[INFO 11-05 08:55:11] Added key: store_based_barrier_key:1 to store for rank: 1
+[INFO 11-05 08:55:11] Rank 2: Completed store-based barrier for key:store_based_barrier_key:1 with 4 nodes.
+[INFO 11-05 08:55:18] Dataset Prepared: 878351 train data, 38297 validation data
+
+[INFO 11-05 08:55:18] Epoch 1/4
