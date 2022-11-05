@@ -4,3 +4,4 @@ validate/
 *.pth
 dataset/
 *.pyc
+training_log/

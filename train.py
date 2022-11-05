@@ -1,4 +1,3 @@
-from pytest import skip
 import torch
 import sys
 import csv
@@ -169,6 +168,7 @@ def valid_epoch(data_loader, predictor, planner, use_planning):
 
 def model_training():
     # Logging
+    print('1')
     log_path = f"./training_log/{args.name}/"
     os.makedirs(log_path, exist_ok=True)
     initLogging(log_file=log_path+'train.log')
@@ -178,22 +178,26 @@ def model_training():
     logging.info("Learning rate: {}".format(args.learning_rate))
     logging.info("Use integrated planning module: {}".format(args.use_planning))
     logging.info("Use device: {}".format(args.device))
+    print('2')
 
-    args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else -1
-    args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else -1
+    args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else args.local_rank
+    args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
 
     set_seed(args.seed+args.local_rank)
     # server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
     # client_store = dist.TCPStore("10.30.9.51",7891,None,False,timedelta(seconds=30),False)
     dist.init_process_group(
-                            backend='nccl',
-                            # init_method='tcp://10.30.9.51:7891',
-                            init_method='tcp://10.13.164.207:7891',
-                            # store= server_store,
-                            rank=args.local_rank,
-                            world_size = args.world_size)
+                            backend="nccl",
+                            # # init_method='tcp://10.30.9.51:7891',
+                            # init_method='tcp://10.13.164.207:7891',
+                            # # store= server_store,
+                            # rank=args.local_rank,
+                            # world_size = args.world_size
+                            )
+    print('3')
+                            
     # set up predictor
-    predictor = Predictor(50)#.to(args.local_rank)
+    predictor = Predictor(50).to(args.local_rank)
     # predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
     predictor = DDP(
                     predictor,
@@ -279,6 +283,7 @@ def model_training():
 
 if __name__ == "__main__":
     # Arguments
+    print("main")
     parser = argparse.ArgumentParser(description='Training')
     parser.add_argument('--name', type=str, help='log name (default: "Exp1")', default="Exp1")
     parser.add_argument('--train_set', type=str, help='path to train datasets')
@@ -296,6 +301,9 @@ if __name__ == "__main__":
     parser.add_argument("--world_size", type=int, default=-1)
 
     args = parser.parse_args()
-
+    os.environ["MASTER_ADDR"] = "10.13.164.207"
+    os.environ["MASTER_PORT"] = "7891"
+    os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
+    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     # Run
     model_training()

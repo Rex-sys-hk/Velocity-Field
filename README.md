@@ -123,12 +123,12 @@ train.py \
 --local_rank 0 \
 --world_size 2
 ```
-torchrun \
---nnodes=3 \
+RANK=0 \
+WORLD_SIZE=7 \
+NCCL_SOCKET_IFNAME=wlo1 \
+NCCL_DEBUG=INFO \
+torchrun --nnodes=3 \
 --nproc_per_node=1 \
---rdzv_id=996 \
---rdzv_backend=c10d
---rdzv_endpoint=10.13.164.207:7891 \
 train.py \
 --name DIPP \
 --train_set /mnt/processed \
