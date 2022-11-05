@@ -1,7 +1,8 @@
-[INFO 11-05 20:46:36] ------------- DIPP -------------
-[INFO 11-05 20:46:36] Batch size: 120
-[INFO 11-05 20:46:36] Learning rate: 0.0002
-[INFO 11-05 20:46:36] Use integrated planning module: True
-[INFO 11-05 20:46:36] Use device: cuda
-[INFO 11-05 20:46:37] Added key: store_based_barrier_key:1 to store for rank: 0
-[INFO 11-05 20:46:47] Waiting in store based barrier to initialize process group for rank: 0, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:53:02] ------------- DIPP -------------
+[INFO 11-05 20:53:02] Batch size: 120
+[INFO 11-05 20:53:02] Learning rate: 0.0002
+[INFO 11-05 20:53:02] Use integrated planning module: True
+[INFO 11-05 20:53:02] Use device: cuda
+[INFO 11-05 20:53:02] Added key: store_based_barrier_key:1 to store for rank: 1
+[INFO 11-05 20:53:12] Waiting in store based barrier to initialize process group for rank: 1, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
+[INFO 11-05 20:53:22] Waiting in store based barrier to initialize process group for rank: 1, key: store_based_barrier_key:1 (world_size=6, worker_count=2, timeout=0:30:00)
