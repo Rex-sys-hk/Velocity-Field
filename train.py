@@ -188,11 +188,10 @@ def model_training():
     # client_store = dist.TCPStore("10.30.9.51",7891,None,False,timedelta(seconds=30),False)
     dist.init_process_group(
                             backend="nccl",
-                            # # init_method='tcp://10.30.9.51:7891',
-                            # init_method='tcp://10.13.164.207:7891',
+                            init_method='tcp://10.13.164.207:7891',
                             # # store= server_store,
-                            # rank=args.local_rank,
-                            # world_size = args.world_size
+                            rank=args.local_rank,
+                            world_size = args.world_size
                             )
     print('3')
                             
@@ -303,6 +302,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.environ["MASTER_ADDR"] = "10.13.164.207"
     os.environ["MASTER_PORT"] = "7891"
+    os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     # Run

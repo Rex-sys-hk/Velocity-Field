@@ -126,8 +126,8 @@ train.py \
 RANK=0 \
 WORLD_SIZE=7 \
 NCCL_SOCKET_IFNAME=wlo1 \
-NCCL_DEBUG=INFO \
-torchrun --nnodes=3 \
+torchrun \ 
+--nnodes=3 \
 --nproc_per_node=1 \
 train.py \
 --name DIPP \
