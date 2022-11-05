@@ -179,7 +179,7 @@ def model_training():
     logging.info("Use device: {}".format(args.device))
 
     # set seed
-    set_seed(args.seed)
+    set_seed(args.seed+args.local_rank)
     # torch.cuda.set_device(args.local_rank)
     args.local_rank = int(os.environ["LOCAL_RANK"])
     dist.init_process_group(backend='nccl')
