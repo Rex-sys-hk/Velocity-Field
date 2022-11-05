@@ -69,6 +69,26 @@ python train.py \
 --learning_rate 2e-4 \
 --device cuda
 ```
+```
+python -m torch.distributed.launch 
+--nproc_per_node=4 \
+--nnodes=2 \
+--node_rank=0 \
+--master_addr="127.0.0.1" \
+--master_port= \
+train.py  \
+--name DIPP  \
+--train_set /mnt/processed  \
+--valid_set /mnt/validate  \
+--use_planning  \
+--seed 3407  \
+--num_workers 45  \
+--pretrain_epochs 5  \
+--train_epochs 20  \
+--batch_size 180  \
+--learning_rate 2e-4  \
+--device cuda \
+```
 
 ### Open-loop testing
 Run ```open_loop_test.py``` to test the trained planner in an open-loop manner. You need to specify the path to the original test dataset ```--test_set``` (path to the folder) and also the file path to the trained model ```--model_path```. Set ```--render``` to visualize the results and set ```--save``` to save the rendered images.
