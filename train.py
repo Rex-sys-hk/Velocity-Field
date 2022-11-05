@@ -178,11 +178,18 @@ def model_training():
     logging.info("Use integrated planning module: {}".format(args.use_planning))
     logging.info("Use device: {}".format(args.device))
 
+    # torch.cuda.set_device(args.local_rank)
+    try:
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+    except:
+        pass
     # set seed
     set_seed(args.seed+args.local_rank)
-    # torch.cuda.set_device(args.local_rank)
-    args.local_rank = int(os.environ["LOCAL_RANK"])
-    dist.init_process_group(backend='nccl')
+    dist.init_process_group(backend='nccl',
+                            init_method='tcp://10.30.9.51:7891',
+                            rank=args.local_rank,
+                            world_size = world_size)
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
     predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
