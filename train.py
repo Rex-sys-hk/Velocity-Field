@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
+from datetime import timedelta
 
 def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch):
     epoch_loss = []
@@ -179,15 +180,21 @@ def model_training():
     logging.info("Use device: {}".format(args.device))
 
     # torch.cuda.set_device(args.local_rank)
+    world_size = -1
     try:
         args.local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
     except:
+        print("failed to get env V")
         pass
     # set seed
     set_seed(args.seed+args.local_rank)
-    dist.init_process_group(backend='nccl',
-                            init_method='tcp://10.30.9.51:7891',
+    server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
+    client_store = dist.TCPStore("10.30.9.51",7891,None,True,timedelta(seconds=30),False)
+    dist.init_process_group(
+                            backend='nccl',
+                            # init_method='tcp://127.0.0.1:7891',
+                            store= server_store,
                             rank=args.local_rank,
                             world_size = world_size)
     # set up predictor
