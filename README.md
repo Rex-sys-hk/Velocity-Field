@@ -100,12 +100,12 @@ train.py \
 ```
 
 ```
-OMP_NUM_THREADS=1 \
+OMP_NUM_THREADS=24 \
 torchrun \
 --nproc_per_node=4 \
---nnodes=2 \
+--nnodes=3 \
 --node_rank=x \
---master_addr="10.30.x.x" \
+--master_addr="10.13.164.207" \
 --master_port=7891 \
 train.py \
 --name DIPP \
@@ -118,11 +118,10 @@ train.py \
 --train_epochs 1 \
 --batch_size 120 \
 --learning_rate 2e-4 \
---device cuda \
+--device cuda
+```
 --local_rank 0 \
 --world_size 2
-```
-
 
 ### Open-loop testing
 Run ```open_loop_test.py``` to test the trained planner in an open-loop manner. You need to specify the path to the original test dataset ```--test_set``` (path to the folder) and also the file path to the trained model ```--model_path```. Set ```--render``` to visualize the results and set ```--save``` to save the rendered images.
