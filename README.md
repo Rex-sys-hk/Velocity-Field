@@ -100,24 +100,25 @@ train.py \
 ```
 
 ```
+NCCL_SOCKET_IFNAME=wlo1 \
 OMP_NUM_THREADS=24 \
 torchrun \
---nproc_per_node=4 \
+--nproc_per_node=1 \
 --nnodes=3 \
---node_rank=x \
---master_addr="10.13.164.207" \
+--node_rank=0 \
+--master_addr="10.30.9.51" \
 --master_port=7891 \
 train.py \
 --name DIPP \
---train_set /mnt/processed \
---valid_set /mnt/validate \
+--train_set dataset/processed \
+--valid_set dataset/validate \
 --use_planning \
 --seed 3407 \
 --num_workers 24 \
 --pretrain_epochs 1 \
 --train_epochs 2 \
 --batch_size 72 \
---learning_rate 2e-4 \
+--learning_rate 1e-3 \
 --device cuda
 ```
 
