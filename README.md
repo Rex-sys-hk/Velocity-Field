@@ -115,30 +115,8 @@ train.py \
 --seed 3407 \
 --num_workers 24 \
 --pretrain_epochs 1 \
---train_epochs 1 \
---batch_size 120 \
---learning_rate 2e-4 \
---device cuda
-```
---local_rank 0 \
---world_size 2
-```
-RANK=0 \
-WORLD_SIZE=7 \
-NCCL_SOCKET_IFNAME=wlo1 \
-torchrun \ 
---nnodes=3 \
---nproc_per_node=1 \
-train.py \
---name DIPP \
---train_set /mnt/processed \
---valid_set /mnt/validate \
---use_planning \
---seed 3407 \
---num_workers 24 \
---pretrain_epochs 1 \
---train_epochs 1 \
---batch_size 24 \
+--train_epochs 2 \
+--batch_size 72 \
 --learning_rate 2e-4 \
 --device cuda
 ```

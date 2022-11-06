@@ -168,7 +168,6 @@ def valid_epoch(data_loader, predictor, planner, use_planning):
 
 def model_training():
     # Logging
-    print('1')
     log_path = f"./training_log/{args.name}/"
     os.makedirs(log_path, exist_ok=True)
     initLogging(log_file=log_path+'train.log')
@@ -178,35 +177,23 @@ def model_training():
     logging.info("Learning rate: {}".format(args.learning_rate))
     logging.info("Use integrated planning module: {}".format(args.use_planning))
     logging.info("Use device: {}".format(args.device))
-    print('2')
 
     args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else args.local_rank
     args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
-    print(args.local_rank,args.world_size)
     set_seed(args.seed+args.local_rank)
 
-    # server_store = dist.TCPStore("127.0.0.1",7891,None,True,timedelta(seconds=30),False)
-    # client_store = dist.TCPStore("10.30.9.51",7891,None,False,timedelta(seconds=30),False)
-    dist.init_process_group(
-                            backend="nccl",
-                            # init_method='tcp://127.0.0.1:7891',
-                            # # # # store= server_store,
-                            # rank=args.local_rank,
-                            # world_size = args.world_size
-                            )
-    print('3')
+    dist.init_process_group(backend="nccl")
     # set up data loaders
     batch_size = args.batch_size
 
     train_set = DrivingData(args.train_set+'/*')
     valid_set = DrivingData(args.valid_set+'/*')
-    train_sampler = DSample(train_set,shuffle=False)
+    train_sampler = DSample(train_set,shuffle=True)
     valid_sampler = DSample(valid_set,shuffle=False)
     train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
     valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
-    print(3.5)
     # predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
     predictor = DDP(
                     predictor,
@@ -215,12 +202,10 @@ def model_training():
                     find_unused_parameters=True
                     )
 
-    print('4')
     # set up planner
     if args.use_planning:
         trajectory_len, feature_len = 50, 9
         planner = MotionPlanner(trajectory_len, feature_len, args.local_rank)
-        # planner = DDP(planner,device_ids=[args.local_rank],find_unused_parameters=True)
     else:
         planner = None
 
@@ -243,11 +228,8 @@ def model_training():
     valid_sampler = DSample(valid_set,shuffle=False)
     train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
     valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
-    # train_loader = DataLoader(train_set, batch_size=batch_size, shuffle = True, num_workers=args.num_workers)
-    # valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle = False, num_workers=args.num_workers)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
-    print('5')
     # begin training
     for epoch in range(train_epochs):
         logging.info(f"Epoch {epoch+1}/{train_epochs}")
@@ -292,7 +274,6 @@ def model_training():
 
 if __name__ == "__main__":
     # Arguments
-    print("main")
     parser = argparse.ArgumentParser(description='Training')
     parser.add_argument('--name', type=str, help='log name (default: "Exp1")', default="Exp1")
     parser.add_argument('--train_set', type=str, help='path to train datasets')
