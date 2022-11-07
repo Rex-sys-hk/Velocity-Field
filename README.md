@@ -100,26 +100,26 @@ train.py \
 ```
 
 ```
-NCCL_SOCKET_IFNAME=wlo1 \
-OMP_NUM_THREADS=24 \
+NCCL_SOCKET_IFNAME=eno1 \
+OMP_NUM_THREADS=48 \
 torchrun \
---nproc_per_node=1 \
---nnodes=3 \
+--nproc_per_node=2 \
+--nnodes=4 \
 --node_rank=0 \
 --master_addr="10.30.9.51" \
---master_port=7891 \
 train.py \
 --name DIPP \
---train_set dataset/processed \
---valid_set dataset/validate \
+--train_set /mnt/processed \
+--valid_set /mnt/validate \
 --use_planning \
 --seed 3407 \
 --num_workers 24 \
---pretrain_epochs 1 \
---train_epochs 2 \
---batch_size 72 \
---learning_rate 1e-3 \
---device cuda
+--pretrain_epochs 0 \
+--train_epochs 1 \
+--batch_size 120 \
+--learning_rate 2e-3 \
+--device cuda \
+--ckpt training_log/DIPP/model_2_1.5032.pth
 ```
 
 ### Open-loop testing

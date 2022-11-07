@@ -25,7 +25,7 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
     start_time = time.time()
 
     for it,batch in enumerate(data_loader):
-        # try:
+        try:
             # prepare data
             ego = batch[0].to(args.local_rank)
             neighbors = batch[1].to(args.local_rank)
@@ -81,12 +81,12 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
             current += batch[0].shape[0]
             sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}]  Loss: {np.mean(epoch_loss):>.4f}  {(time.time()-start_time)/current:>.4f}s/sample")
             sys.stdout.flush()
-        # except:
-        #     print(">>>>skip====>>>>")
-    if args.local_rank==0 and use_planning and it%100==0:
-        torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{it}.pth')
-        logging.info(f"Model saved in training_log/{args.name}\n")    
-    dist.barrier()
+        except:
+            print(">>>>skip====>>>>")
+        if args.local_rank==0 and use_planning and it%100==0:
+            torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{it}.pth')
+            logging.info(f"Model saved in training_log/{args.name}\n")    
+        dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
