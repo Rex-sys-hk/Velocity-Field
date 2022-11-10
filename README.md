@@ -122,7 +122,7 @@ train.py \
 --batch_size 48 \
 --learning_rate 2e-4 \
 --device cuda \
---ckpt training_log/DIPP/model_1_1100.pth
+--ckpt training_log/DIPP/model_1.pth
 ```
 
 ### Open-loop testing
