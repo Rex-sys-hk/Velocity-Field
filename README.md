@@ -104,8 +104,11 @@ NCCL_SOCKET_IFNAME=eno1 \
 OMP_NUM_THREADS=48 \
 torchrun \
 --nproc_per_node=2 \
---nnodes=4 \
+--nnodes=1:3 \
 --node_rank=0 \
+--rdzv_id=10086 \
+--rdzv_backend=c10d \
+--max_restarts=3 \
 --master_addr="10.30.9.51" \
 train.py \
 --name DIPP \
@@ -113,13 +116,13 @@ train.py \
 --valid_set /mnt/validate \
 --use_planning \
 --seed 3407 \
---num_workers 24 \
+--num_workers 48 \
 --pretrain_epochs 0 \
 --train_epochs 1 \
---batch_size 120 \
---learning_rate 2e-3 \
+--batch_size 48 \
+--learning_rate 2e-4 \
 --device cuda \
---ckpt training_log/DIPP/model_2_1.5032.pth
+--ckpt training_log/DIPP/model_1_1100.pth
 ```
 
 ### Open-loop testing
