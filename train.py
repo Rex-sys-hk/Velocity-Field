@@ -206,7 +206,11 @@ def model_training():
 
     if args.ckpt:
         map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
-        predictor.load_state_dict(torch.load(args.ckpt,map_location = map_location)) 
+        try:
+            predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
+        except:
+            predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
+        # predictor.load_state_dict(torch.load(args.ckpt,map_location = map_location)) 
     
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)

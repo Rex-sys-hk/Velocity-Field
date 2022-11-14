@@ -29,7 +29,10 @@ def closed_loop_test():
     # load model
     predictor = Predictor(50).to(args.device)
     predictor = torch.nn.DataParallel(predictor)
-    predictor.load_state_dict(torch.load(args.model_path, map_location=args.device))
+    try:
+        predictor.load_state_dict(torch.load(args.model_path, map_location=args.device))
+    except:
+        predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.model_path, map_location=args.device).items()})
     predictor.eval()
 
     # cache results
