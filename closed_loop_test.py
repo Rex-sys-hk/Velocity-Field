@@ -28,6 +28,7 @@ def closed_loop_test():
 
     # load model
     predictor = Predictor(50).to(args.device)
+    predictor = torch.nn.DataParallel(predictor)
     predictor.load_state_dict(torch.load(args.model_path, map_location=args.device))
     predictor.eval()
 
@@ -139,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--render', action="store_true", help='if render the scene (default: False)', default=False)
     parser.add_argument('--save', action="store_true", help='if save animation (default: False)', default=False)
-    parser.add_argument('--device', type=str, help='run on which device (default: cpu)', default='cpu')
+    parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     args = parser.parse_args()
 
     # Run
