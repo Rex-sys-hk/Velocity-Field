@@ -5,4 +5,5 @@ validate/
 dataset/
 *.pyc
 training_log/
+testing_log/
 start_train.sh

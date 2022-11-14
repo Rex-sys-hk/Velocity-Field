@@ -33,6 +33,7 @@ python data_process.py \
 --save_path /output/path/to/processed/data \
 --use_multiprocessing
 ```
+```
 python data_process.py \
 --load_path /host/training_20s \
 --save_path /host/DIPP/processed \
@@ -55,50 +56,12 @@ python train.py \
 --learning_rate 2e-4 \
 --device cuda
 ```
-```shell
-python train.py \
---name DIPP \
---train_set /mnt/processed \
---valid_set /mnt/validate \
---use_planning \
---seed 3407 \
---num_workers 90 \
---pretrain_epochs 5 \
---train_epochs 20 \
---batch_size 180 \
---learning_rate 2e-4 \
---device cuda
-```
-python -m torch.distributed.launch
 ```
 0: 10.30.9.51
 1: 10.30.8.250
 2: 10.30.10.63
 3: 10.30.9.88
 ```
-
-```
-OMP_NUM_THREADS=1 \
-torchrun \
---nproc_per_node=2 \
---nnodes=2 \
---node_rank=0 \
---master_addr="127.0.0.1" \
---master_port=7891 \
-train.py \
---name DIPP \
---train_set /mnt/processed \
---valid_set /mnt/validate \
---use_planning \
---seed 3407 \
---num_workers 48 \
---pretrain_epochs 1 \
---train_epochs 2 \
---batch_size 180 \
---learning_rate 2e-4 \
---device cuda
-```
-
 ```
 NCCL_SOCKET_IFNAME=eno1 \
 OMP_NUM_THREADS=48 \
