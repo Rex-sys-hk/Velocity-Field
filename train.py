@@ -225,8 +225,8 @@ def model_training():
     valid_set = DrivingData(args.valid_set+'/*')
     train_sampler = DSample(train_set,shuffle=False)
     valid_sampler = DSample(valid_set,shuffle=False)
-    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
-    valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
+    # train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
+    # valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     # begin training
@@ -238,7 +238,10 @@ def model_training():
             if epoch < args.pretrain_epochs:
                 args.use_planning = False
             else:
-                args.use_planning = True         
+                args.use_planning = True
+        btsz = batch_size if args.use_planning else batch_size*4
+        train_loader = DataLoader(train_set, batch_size=btsz, num_workers=args.num_workers,sampler=train_sampler)
+        valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
 
         train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, args.use_planning, epoch)
         val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, args.use_planning)
