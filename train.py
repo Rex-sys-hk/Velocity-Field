@@ -44,26 +44,29 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
             
             # plan
             if use_planning:
-                plan, prediction = select_future(plans, predictions, scores)
+                try:
+                    plan, prediction = select_future(plans, predictions, scores)
 
-                planner_inputs = {
-                    "control_variables": plan.view(-1, 100), # initial control sequence
-                    "predictions": prediction.detach(), # prediction for surrounding vehicles 
-                    "ref_line_info": ref_line_info,
-                    "current_state": current_state
-                }
+                    planner_inputs = {
+                        "control_variables": plan.view(-1, 100), # initial control sequence
+                        "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                        "ref_line_info": ref_line_info,
+                        "current_state": current_state
+                    }
 
-                for i in range(cost_function_weights.shape[1]):
-                    planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+                    for i in range(cost_function_weights.shape[1]):
+                        planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
-                final_values, info = planner.layer.forward(planner_inputs)
-                plan = final_values["control_variables"].view(-1, 50, 2)
-                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+                    final_values, info = planner.layer.forward(planner_inputs)
+                    plan = final_values["control_variables"].view(-1, 50, 2)
+                    plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
 
-                plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
-                loss += plan_loss + 1e-3 * plan_cost # planning loss
+                    plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
+                    plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
+                    plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+                    loss += plan_loss + 1e-3 * plan_cost # planning loss
+                except:
+                    plan, prediction = select_future(plan_trajs, predictions, scores)
             else:
                 plan, prediction = select_future(plan_trajs, predictions, scores)
 
@@ -87,10 +90,10 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
             sys.stdout.flush()
         # except:
         #     print(">>>>skip====>>>>")
-            if args.local_rank==0 and use_planning and it%250==0:
+            if args.local_rank==0 and use_planning and it%500==0:
                 torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}.pth')
                 logging.info(f"Model saved in training_log/{args.name}\n")    
-            if use_planning and it%250==0:    
+            if use_planning and it%500==0:    
                 dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
