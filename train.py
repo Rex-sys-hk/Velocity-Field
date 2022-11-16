@@ -90,8 +90,8 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
         if args.local_rank==0 and use_planning and it%500==0:
             torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_tmp.pth')
             logging.info(f"Model saved in training_log/{args.name}\n")
-        if use_planning and it%500==0:    
-            dist.barrier()
+        # if use_planning and it%500==0:    
+        #     dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
@@ -271,7 +271,8 @@ def model_training():
         # save model at the end of epoch
         if args.local_rank==0:
             torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth')
-            logging.info(f"Model saved in training_log/{args.name}\n")    
+            logging.info(f"Model saved in training_log/{args.name}\n")
+        dist.barrier()
 
     dist.destroy_process_group()
 
