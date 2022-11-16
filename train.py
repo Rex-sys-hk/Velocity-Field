@@ -90,6 +90,7 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
             if args.local_rank==0 and use_planning and it%250==0:
                 torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}.pth')
                 logging.info(f"Model saved in training_log/{args.name}\n")    
+            if use_planning and it%250==0:    
                 dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
