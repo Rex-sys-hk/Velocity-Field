@@ -25,76 +25,73 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
     start_time = time.time()
 
     for it,batch in enumerate(data_loader):
-        # try:
-            # prepare data
-            ego = batch[0].to(args.local_rank)
-            neighbors = batch[1].to(args.local_rank)
-            map_lanes = batch[2].to(args.local_rank)
-            map_crosswalks = batch[3].to(args.local_rank)
-            ref_line_info = batch[4].to(args.local_rank)
-            ground_truth = batch[5].to(args.local_rank)
-            current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-            weights = torch.ne(ground_truth[:, 1:, :, :3], 0)
+        # prepare data
+        ego = batch[0].to(args.local_rank)
+        neighbors = batch[1].to(args.local_rank)
+        map_lanes = batch[2].to(args.local_rank)
+        map_crosswalks = batch[3].to(args.local_rank)
+        ref_line_info = batch[4].to(args.local_rank)
+        ground_truth = batch[5].to(args.local_rank)
+        current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+        weights = torch.ne(ground_truth[:, 1:, :, :3], 0)
 
-            # predict
-            optimizer.zero_grad()
-            plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-            plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
-            loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
-            
-            # plan
-            if use_planning:
-                try:
-                    plan, prediction = select_future(plans, predictions, scores)
+        # predict
+        optimizer.zero_grad()
+        plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
+        loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
+        
+        # plan
+        if use_planning:
+            try:
+                plan, prediction = select_future(plans, predictions, scores)
 
-                    planner_inputs = {
-                        "control_variables": plan.view(-1, 100), # initial control sequence
-                        "predictions": prediction.detach(), # prediction for surrounding vehicles 
-                        "ref_line_info": ref_line_info,
-                        "current_state": current_state
-                    }
+                planner_inputs = {
+                    "control_variables": plan.view(-1, 100), # initial control sequence
+                    "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                    "ref_line_info": ref_line_info,
+                    "current_state": current_state
+                }
 
-                    for i in range(cost_function_weights.shape[1]):
-                        planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+                for i in range(cost_function_weights.shape[1]):
+                    planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
-                    final_values, info = planner.layer.forward(planner_inputs)
-                    plan = final_values["control_variables"].view(-1, 50, 2)
-                    plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+                final_values, info = planner.layer.forward(planner_inputs)
+                plan = final_values["control_variables"].view(-1, 50, 2)
+                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
 
-                    plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-                    plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-                    plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
-                    loss += plan_loss + 1e-3 * plan_cost # planning loss
-                except:
-                    plan, prediction = select_future(plan_trajs, predictions, scores)
-            else:
+                plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
+                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
+                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+                loss += plan_loss + 1e-3 * plan_cost # planning loss
+            except:
                 plan, prediction = select_future(plan_trajs, predictions, scores)
+        else:
+            plan, prediction = select_future(plan_trajs, predictions, scores)
 
-            # loss backward
-            loss.backward()
-            nn.utils.clip_grad_norm_(predictor.parameters(), 5)
-            optimizer.step()
+        # loss backward
+        loss.backward()
+        nn.utils.clip_grad_norm_(predictor.parameters(), 5)
+        optimizer.step()
 
-            # compute metrics
-            metrics = motion_metrics(plan, prediction, ground_truth, weights)
-            epoch_metrics.append(metrics)
-            epoch_loss.append(loss.item())
+        # compute metrics
+        metrics = motion_metrics(plan, prediction, ground_truth, weights)
+        epoch_metrics.append(metrics)
+        epoch_loss.append(loss.item())
 
-            # show loss
-            current += batch[0].shape[0]
-            sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}] \
-            Loss: {np.mean(epoch_loss):>.4f} \
-            {(time.time()-start_time)/current:>.4f}s/sample \
-            T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
-            )
-            sys.stdout.flush()
-        # except:
-        #     print(">>>>skip====>>>>")
-            if args.local_rank==0 and use_planning and it%500==0:
-                torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}.pth')
-                logging.info(f"Model saved in training_log/{args.name}\n")    
-            if use_planning and it%500==0:    
-                dist.barrier()
+        # show loss
+        current += batch[0].shape[0]
+        sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}] \
+        Loss: {np.mean(epoch_loss):>.4f} \
+        {(time.time()-start_time)/current:>.4f}s/sample \
+        T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
+        )
+        sys.stdout.flush()
+        if args.local_rank==0 and use_planning and it%500==0:
+            torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_tmp.pth')
+            logging.info(f"Model saved in training_log/{args.name}\n")
+        if use_planning and it%500==0:    
+            dist.barrier()
     # show metrics
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
@@ -275,7 +272,7 @@ def model_training():
         if args.local_rank==0:
             torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth')
             logging.info(f"Model saved in training_log/{args.name}\n")    
-            dist.barrier()
+
     dist.destroy_process_group()
 
 if __name__ == "__main__":
