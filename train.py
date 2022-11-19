@@ -224,7 +224,7 @@ def model_training():
     # set up data loaders
     train_set = DrivingData(args.train_set+'/*')
     valid_set = DrivingData(args.valid_set+'/*')
-    train_sampler = DSample(train_set,shuffle=False)
+    train_sampler = DSample(train_set,shuffle=True)
     valid_sampler = DSample(valid_set,shuffle=False)
     # train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
     # valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
