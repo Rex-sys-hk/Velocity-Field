@@ -202,6 +202,8 @@ def model_training():
     if args.use_planning:
         trajectory_len, feature_len = 50, 9
         planner = MotionPlanner(trajectory_len, feature_len, args.local_rank)
+    if args.use_RiskMap:
+        planner = RiskMapPlanner(trajectory_len, feature_len, args.loca_rank)
     else:
         planner = None
 
@@ -211,7 +213,6 @@ def model_training():
             predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
         except:
             predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
-        # predictor.load_state_dict(torch.load(args.ckpt,map_location = map_location)) 
     
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
@@ -226,8 +227,6 @@ def model_training():
     valid_set = DrivingData(args.valid_set+'/*')
     train_sampler = DSample(train_set,shuffle=False)
     valid_sampler = DSample(valid_set,shuffle=False)
-    # train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
-    # valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     # begin training
