@@ -225,7 +225,7 @@ def model_training():
     # set up data loaders
     train_set = DrivingData(args.train_set+'/*')
     valid_set = DrivingData(args.valid_set+'/*')
-    train_sampler = DSample(train_set,shuffle=False)
+    train_sampler = DSample(train_set,shuffle=True)
     valid_sampler = DSample(valid_set,shuffle=False)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
