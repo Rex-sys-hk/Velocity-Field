@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from utils.riskmap.utils import load_cfg_here
+from .meter2risk import CostModules, Meter2Risk 
 
 # Agent history encoder
 class AgentEncoder(nn.Module):
@@ -120,7 +122,14 @@ class Agent2Map(nn.Module):
         crosswalks_actor = [self.crosswalk_attention(query, crosswalks[:, i], crosswalks[:, i]) for i in range(crosswalks.shape[1])]
         map_actor = torch.cat(lanes_actor+crosswalks_actor, dim=1)
         output = self.map_attention(query, map_actor, map_actor, mask).squeeze(2)
-
+        # print('Agent2Map')
+        # print(len(lanes_actor))
+        # print(len(crosswalks_actor))
+        # print(lanes_actor[0].shape)
+        # print(crosswalks_actor[0].shape)
+        # print(map_actor.shape)
+        # print(output.shape)
+        # print('Agent2Map_END')
         return map_actor, output 
 
 # Decoders
@@ -212,6 +221,11 @@ class Predictor(nn.Module):
         self.plan = AVDecoder(self._future_steps)
         self.predict = AgentDecoder(self._future_steps)
         self.score = Score()
+        # to be compatible with risk map 
+        cfg = load_cfg_here()
+        self.meter2risk = [CostModules[cfg['planner']['meter2risk']['name']]()]
+        self.meter2risk_local_instance: Meter2Risk = self.meter2risk[0]
+        self.latent_feature = None
 
     def forward(self, ego, neighbors, map_lanes, map_crosswalks):
         # actors
@@ -250,8 +264,14 @@ class Predictor(nn.Module):
         plans, cost_function_weights = self.plan(agent_map[:, :, 0], agent_agent[:, 0])
         predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
         scores = self.score(map_feature, agent_agent, agent_map)
+        self.latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
+        self.meter2risk_local_instance.set_latent_feature(self.latent_feature)
         
         return plans, predictions, scores, cost_function_weights
+    
+    # def get_latent_feature(self):
+    #     return self.latent_feature
+
 
 if __name__ == "__main__":
     # set up model

@@ -7,3 +7,4 @@ dataset/
 training_log/
 testing_log/
 start_train.sh
+utils/riskmap/mpp/lib/build/

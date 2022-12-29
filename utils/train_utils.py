@@ -7,6 +7,8 @@ from torch.utils.data import Dataset
 from torch.nn import functional as F
 import os
 
+from utils.riskmap.car import WB
+
 def initLogging(log_file: str, level: str = "INFO"):
     logging.basicConfig(filename=log_file, filemode='w',
                         level=getattr(logging, level, None),
@@ -79,12 +81,12 @@ def select_future(plans, predictions, scores):
 
 def motion_metrics(plan_trajectory, prediction_trajectories, ground_truth_trajectories, weights):
     prediction_trajectories = prediction_trajectories * weights
-    plan_distance = torch.norm(plan_trajectory[:, :, :2] - ground_truth_trajectories[:, 0, :, :2], dim=-1)
+    plan_distance = torch.norm(plan_trajectory[..., :2] - ground_truth_trajectories[..., 0:1, :, :2], dim=-1)
     prediction_distance = torch.norm(prediction_trajectories[:, :, :, :2] - ground_truth_trajectories[:, 1:, :, :2], dim=-1)
 
     # planning
     plannerADE = torch.mean(plan_distance)
-    plannerFDE = torch.mean(plan_distance[:, -1])
+    plannerFDE = torch.mean(plan_distance[..., -1,:])
     
     # prediction
     predictorADE = torch.mean(prediction_distance, dim=-1)
@@ -128,7 +130,7 @@ def bicycle_model(control, current_state):
     y_0 = current_state[:, 1] # vehicle's y-coordinate [m]
     theta_0 = current_state[:, 2] # vehicle's heading [rad]
     v_0 = torch.hypot(current_state[:, 3], current_state[:, 4]) # vehicle's velocity [m/s]
-    L = 3.089 # vehicle's wheelbase [m]
+    L = WB # vehicle's wheelbase [m]
     a = control[:, :, 0].clamp(-max_a, max_a) # vehicle's accleration [m/s^2]
     delta = control[:, :, 1].clamp(-max_delta, max_delta) # vehicle's steering [rad]
 
@@ -150,7 +152,12 @@ def bicycle_model(control, current_state):
 
     return traj
 
+def inverse_bicycle_model(traj, current_state):
+    control = 0 #TODO
+    return control
+
 def physical_model(control, current_state, dt=0.1):
+    # point with mass
     dt = 0.1 # discrete time period [s]
     max_d_theta = 0.5 # vehicle's change of angle limits [rad/s]
     max_a = 5 # vehicle's accleration limits [m/s^2]

@@ -1,3 +1,5 @@
+from joblib import PrintTime
+from sklearn.utils import shuffle
 import torch
 import sys
 import csv
@@ -5,26 +7,36 @@ import time
 import argparse
 import logging
 import os
+import yaml
+import shutil
 import numpy as np
+from tensorboardX import SummaryWriter
 from torch import nn, optim
 from utils.train_utils import *
-from model.planner import MotionPlanner
+from utils.riskmap.utils import load_cfg_here
+from model.planner import MotionPlanner, Planner,RiskMapPlanner
+from model.meter2risk import Meter2Risk, CostModules
 from model.predictor import Predictor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
-from datetime import timedelta
+# TODO NOTE HACK FIXME
 
-def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch):
+os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.getenv('DIPP_ABS_PATH'))
+
+def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, use_planning, epoch):
     epoch_loss = []
     epoch_metrics = []
     current = 0
     size = len(data_loader.dataset)
     predictor.train()
     start_time = time.time()
-
+    iter_base = size*epoch/args.batch_size
+    tb_iters = iter_base
     for it,batch in enumerate(data_loader):
+        tb_iters += it
         # prepare data
         ego = batch[0].to(args.local_rank)
         neighbors = batch[1].to(args.local_rank)
@@ -33,41 +45,56 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
         ref_line_info = batch[4].to(args.local_rank)
         ground_truth = batch[5].to(args.local_rank)
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-        weights = torch.ne(ground_truth[:, 1:, :, :3], 0)
-
+        weights = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
         # predict
         optimizer.zero_grad()
         plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
         plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
         loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
-        
         # plan
-        if use_planning:
-            try:
-                plan, prediction = select_future(plans, predictions, scores)
+        # try: # to handle both no initialized planner and unsolvable problems
+        if planner.name=='dipp' and use_planning:
+            plan, prediction = select_future(plans, predictions, scores)
 
-                planner_inputs = {
-                    "control_variables": plan.view(-1, 100), # initial control sequence
-                    "predictions": prediction.detach(), # prediction for surrounding vehicles 
-                    "ref_line_info": ref_line_info,
-                    "current_state": current_state
-                }
+            planner_inputs = {
+                "control_variables": plan.view(-1, 100), # initial control sequence
+                "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state # including neighbor cars
+            }
 
-                for i in range(cost_function_weights.shape[1]):
-                    planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+            for i in range(cost_function_weights.shape[1]):
+                planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
-                final_values, info = planner.layer.forward(planner_inputs)
-                plan = final_values["control_variables"].view(-1, 50, 2)
-                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+            final_values, info = planner.layer.forward(planner_inputs)
+            plan = final_values["control_variables"].view(-1, 50, 2)
+            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
 
-                plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
-                loss += plan_loss + 1e-3 * plan_cost # planning loss
-            except:
-                plan, prediction = select_future(plan_trajs, predictions, scores)
+            plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
+            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
+            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+            loss += plan_loss + 1e-3 * plan_cost # planning loss
+        elif planner.name=='risk' and use_planning:
+            plan, prediction = select_future(plans, predictions, scores)
+
+            planner_inputs = {
+                "control_variables": plan.view(-1, 100), # initial control sequence
+                "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state,
+                # "latent_feature": predictor.module.get_latent_feature()
+            }
+            # print('predict', planner_inputs['predictions'])            
+            plan, u = planner.plan(planner_inputs, batch) # control
+            # traj = bicycle_model(u, ego[:, -1])[:, :, :3] # traj
+            plan_loss = planner.get_loss(ground_truth[...,0:1,:,:])
+            # plan_loss += F.smooth_l1_loss(X, ground_truth[:, 0, :, :3])  # avoid gradient explosion
+            # plan_loss += F.smooth_l1_loss(X[:, -1], ground_truth[:, 0, -1, :3])
+            loss = plan_loss #+ 1e-3 * plan_cost # planning loss
         else:
             plan, prediction = select_future(plan_trajs, predictions, scores)
+        # except:
+        #     plan, prediction = select_future(plan_trajs, predictions, scores)
 
         # loss backward
         loss.backward()
@@ -79,17 +106,26 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
         epoch_metrics.append(metrics)
         epoch_loss.append(loss.item())
 
-        # show loss
-        current += batch[0].shape[0]
-        sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}] \
-        Loss: {np.mean(epoch_loss):>.4f} \
-        {(time.time()-start_time)/current:>.4f}s/sample \
-        T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
-        )
-        sys.stdout.flush()
-        if args.local_rank==0 and use_planning and it%500==0:
-            torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_tmp.pth')
-            logging.info(f"Model saved in training_log/{args.name}\n")
+
+        # logging and show loss
+        if args.local_rank==0:
+            current += batch[0].shape[0]
+            sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}] \
+            Loss: {np.mean(epoch_loss):>.4f} \
+            {(time.time()-start_time)/current:>.4f}s/sample \
+            T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
+            )
+            sys.stdout.flush()
+            tbwriter.add_scalar('loss/'+'0total', loss.mean(), tb_iters)
+            # tbwriter.add_scalar('raw_meter/' + 's0', s0.mean(), self.tb_iters)
+            # tbwriter.add_scalar('raw_meter/' + 'v_raw', fut_traj[...,-1].mean(), self.tb_iters)
+            # tbwriter.add_scalar('raw_meter/' + 'sample diffXd.mean()', diffXd.mean(), self.tb_iters)
+            # tbwriter.add_scalar('raw_meter/' + 'sample costs.mean()', costs.mean(), self.tb_iters)
+            # tbwriter.add_scalar('loss_ele/' + 'traj_cost', costs[:,-1].mean(), self.tb_iters)
+            if use_planning and it%500==0:
+                torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_tmp.pth')
+                logging.info(f"Model saved in training_log/{args.name}\n")
+
         # if use_planning and it%500==0:    
         #     dist.barrier()
     # show metrics
@@ -101,7 +137,7 @@ def train_epoch(data_loader, predictor, planner, optimizer, use_planning, epoch)
         
     return np.mean(epoch_loss), epoch_metrics
 
-def valid_epoch(data_loader, predictor, planner, use_planning):
+def valid_epoch(data_loader, predictor, planner: Planner, use_planning):
     epoch_loss = []
     epoch_metrics = []
     current = 0
@@ -127,30 +163,46 @@ def valid_epoch(data_loader, predictor, planner, use_planning):
             loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
 
         # plan 
-        if use_planning:
-            plan, prediction = select_future(plans, predictions, scores)
+        try: # to handle both no initialized planner and unsolvable problems
+            if planner.name=='dipp':
+                plan, prediction = select_future(plans, predictions, scores)
 
-            planner_inputs = {
-                "control_variables": plan.view(-1, 100), # generate initial control sequence
-                "predictions": prediction, # generate predictions for surrounding vehicles 
-                "ref_line_info": ref_line_info,
-                "current_state": current_state
-            }
+                planner_inputs = {
+                    "control_variables": plan.view(-1, 100), # generate initial control sequence
+                    "predictions": prediction, # generate predictions for surrounding vehicles 
+                    "ref_line_info": ref_line_info,
+                    "current_state": current_state
+                }
 
-            for i in range(cost_function_weights.shape[1]):
-                planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+                for i in range(cost_function_weights.shape[1]):
+                    planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
-            with torch.no_grad():
-                final_values, info = planner.layer.forward(planner_inputs)
+                with torch.no_grad():
+                    final_values, info = planner.layer.forward(planner_inputs)
 
-            plan = final_values["control_variables"].view(-1, 50, 2)
-            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+                    plan = final_values["control_variables"].view(-1, 50, 2)
+                    plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
 
-            plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3])
-            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
-            loss += plan_loss + 1e-3 * plan_cost # planning loss
-        else:
+                    plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
+                    plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
+                    plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+                    loss += plan_loss + 1e-3 * plan_cost # planning loss
+            if planner.name=='risk':
+                plan, prediction = select_future(plans, predictions, scores)
+
+                planner_inputs = {
+                    "control_variables": plan.view(-1, 100), # initial control sequence
+                    "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                    "ref_line_info": ref_line_info,
+                    "current_state": current_state
+                }
+
+                with torch.no_grad():
+                    plan, u = planner.forward(planner_inputs, batch) # control
+                    # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
+                    plan_loss += planner.get_loss(ground_truth)
+                    loss += plan_loss + 1e-3 * plan_cost # planning loss
+        except:
             plan, prediction = select_future(plan_trajs, predictions, scores)
 
         # compute metrics
@@ -176,6 +228,7 @@ def model_training():
     log_path = f"./training_log/{args.name}/"
     os.makedirs(log_path, exist_ok=True)
     initLogging(log_file=log_path+'train.log')
+    shutil.copyfile(os.getenv('DIPP_CONFIG'), f'{log_path}/config.yaml')
 
     logging.info("------------- {} -------------".format(args.name))
     logging.info("Batch size: {}".format(args.batch_size))
@@ -186,24 +239,32 @@ def model_training():
     args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else args.local_rank
     args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
     set_seed(args.seed+args.local_rank)
-
-    dist.init_process_group(backend="nccl")
+    try:
+        dist.init_process_group(backend="nccl")
+        distributed = True
+    except:
+        distributed = False
+        print('distributed data parallele initialization failed')
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
-    # predictor = DDP(predictor,device_ids=[args.local_rank],find_unused_parameters=True)
-    predictor = DDP(
-                    predictor,
-                    device_ids=[args.local_rank],
-                    output_device=args.local_rank,
-                    find_unused_parameters=True
-                    )
-
+    if distributed:
+        predictor = DDP(
+                        predictor,
+                        device_ids=[args.local_rank],
+                        output_device=args.local_rank,
+                        find_unused_parameters=True
+                        )
     # set up planner
     if args.use_planning:
-        trajectory_len, feature_len = 50, 9
-        planner = MotionPlanner(trajectory_len, feature_len, args.local_rank)
-    if args.use_RiskMap:
-        planner = RiskMapPlanner(trajectory_len, feature_len, args.loca_rank)
+        if cfg['planner']['name'] == 'dipp':
+            trajectory_len, feature_len = 50, 9
+            planner = MotionPlanner(trajectory_len, feature_len, device= args.local_rank)
+        if cfg['planner']['name'] == 'risk':
+            # trajectory_len, feature_len = 50, 9
+            if distributed:
+                planner = RiskMapPlanner(predictor.module.meter2risk, device= args.local_rank)
+            else:
+                planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)    
     else:
         planner = None
 
@@ -225,8 +286,12 @@ def model_training():
     # set up data loaders
     train_set = DrivingData(args.train_set+'/*')
     valid_set = DrivingData(args.valid_set+'/*')
-    train_sampler = DSample(train_set,shuffle=True)
-    valid_sampler = DSample(valid_set,shuffle=False)
+    if distributed:
+        train_sampler = DSample(train_set,shuffle=True)
+        valid_sampler = DSample(valid_set,shuffle=False)
+    else:
+        train_sampler = RandomSampler(train_set)
+        valid_sampler = SequentialSampler(valid_set)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     # begin training
@@ -269,11 +334,13 @@ def model_training():
 
         # save model at the end of epoch
         if args.local_rank==0:
-            torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth')
-            logging.info(f"Model saved in training_log/{args.name}\n")
-        dist.barrier()
-
-    dist.destroy_process_group()
+            ckpt_file_name = f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth'
+            torch.save(predictor.state_dict(), ckpt_file_name)
+            logging.info(f"Model saved in training_log/{args.name}/{ckpt_file_name}")
+        if distributed:
+            dist.barrier()
+    if distributed:
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     # Arguments
@@ -290,12 +357,23 @@ if __name__ == "__main__":
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     parser.add_argument('--ckpt', type=str, default=None)
-    parser.add_argument("--local_rank", type=int, default=-1)
-    parser.add_argument("--world_size", type=int, default=-1)
+    parser.add_argument(
+        "-c", "--config", help="Config file with dataset parameters", required=False, default=None, type=str)
+    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--world_size", type=int, default=1)
 
     args = parser.parse_args()
+    distributed = False
     # os.environ["NCCL_DEBUG"] = "INFO"
     # os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
     # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     # Run
+    cfg_file = args.config if args.config else 'config.yaml'
+    os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)
+    cfg = load_cfg_here()
+    tb_iter = 0
+    tbwriter = SummaryWriter(
+    log_dir=os.path.join(f'training_log/{args.name}', 'tensorboard_logs')
+    )
+
     model_training()
