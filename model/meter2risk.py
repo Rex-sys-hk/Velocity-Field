@@ -262,8 +262,9 @@ class DeepCost(Meter2Risk):
         #                             )
 
         # No soft max in mlp as the th dim is not seperated
+        input_shape=256
         self.beta = nn.Sequential(
-                                    nn.Linear(192,64),
+                                    nn.Linear(input_shape,64),
                                     nn.LayerNorm(64),
                                     nn.GELU(),
                                     nn.Linear(64,32),
@@ -274,7 +275,7 @@ class DeepCost(Meter2Risk):
                                     nn.Sigmoid(),
                                     ).to(device)
         self.lmda = nn.Sequential(
-                                    nn.Linear(192,64),
+                                    nn.Linear(input_shape,64),
                                     nn.LayerNorm(64),
                                     nn.GELU(),
                                     nn.Linear(64,32),
@@ -285,7 +286,7 @@ class DeepCost(Meter2Risk):
                                     # nn.Sigmoid()
                                     ).to(device)       
         self.Rmat = nn.Sequential(
-                                    nn.Linear(192,64),
+                                    nn.Linear(input_shape,64),
                                     nn.LayerNorm(64),
                                     nn.GELU(),
                                     nn.Linear(64,32),
@@ -296,7 +297,7 @@ class DeepCost(Meter2Risk):
                                     # nn.Softmax(dim=-1)
                                     ).to(device)
         self.target_v = nn.Sequential(
-                                    nn.Linear(192,64),
+                                    nn.Linear(input_shape,64),
                                     nn.LayerNorm(64),
                                     nn.GELU(),
                                     nn.Linear(64,32),
@@ -312,15 +313,20 @@ class DeepCost(Meter2Risk):
         #     # 0-sdf 1-ref 2-tl 3-coll 4-a 5-s 6-v
 
         # useful parameters
-        sample_num, th, items = raw_meters.shape
+        raw_meter=[]
+        for key in raw_meters.keys():
+            raw_meter.append(raw_meters[key])
+        raw_meters=torch.cat(raw_meter,dim=-1)
+        batch, sample_num, th, items = raw_meters.shape
 
         # create cost container
-        cost = torch.zeros((sample_num,th,self.map_elements+self.u_dim+self.target_v_dim),device=self.device)
+        cost = torch.zeros((batch,sample_num,th,self.map_elements+self.u_dim+self.target_v_dim),device=self.device)
         if len(raw_meters.shape)!=3:
             ValueError('raw_meter in shape', raw_meters.shape, 'which should be in 3 dim')
 
         # get ego context encoding
-        context_enc = prediction['context_enc']['agents2graph_enc'][-1]
+        # context_enc = prediction['context_enc']['agents2graph_enc'][-1]
+        context_enc = self.latent_feature['agent_map'][...,0,:].max(dim=1).values
 
         # raw_meters Normalization
         # raw_meters = F.normalize(raw_meters,dim=-1)
@@ -328,13 +334,13 @@ class DeepCost(Meter2Risk):
         raw_meters[...,:self.map_elements] = F.normalize(raw_meters[...,:self.map_elements],dim= -1)
         
         # get params wrt context enc
-        beta = self.beta(context_enc).view(-1,self.th,self.map_elements)
+        beta = self.beta(context_enc).view(batch,-1,self.th,self.map_elements)
         beta = torch.softmax(beta,dim=-1)
-        lmda = self.lmda(context_enc).view(-1,self.th,self.map_elements)
+        lmda = self.lmda(context_enc).view(batch,-1,self.th,self.map_elements)
         # lmda = torch.softmax(lmda,dim=-1)*3
-        R_mat = self.Rmat(context_enc).reshape(-1,self.th,self.u_dim)
+        R_mat = self.Rmat(context_enc).reshape(batch,-1,self.th,self.u_dim)
         R_mat = torch.softmax(R_mat,dim=-1)
-        target_v = self.target_v(context_enc).reshape(-1,self.th,self.target_v_dim)
+        target_v = self.target_v(context_enc).reshape(batch,-1,self.th,self.target_v_dim)
         self.target_v_value = target_v
 
         L_cost = beta*torch.exp(lmda*raw_meters[...,:self.map_elements])
@@ -844,7 +850,8 @@ class SimpleCostCoef(Meter2Risk):
     
     def forward(self, raw_meters):
         raw_meters = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
-        return self.get_coeff(self.latent_feature['agent_map'][...,0,:].max(dim=1).values).reshape(-1,1,self.th,self.map_elements)*raw_meters
+        coeff = self.get_coeff(self.latent_feature['agent_map'][...,0,:].max(dim=1).values).reshape(-1,1,self.th,self.map_elements)
+        return coeff*raw_meters
         
 CostModules = {
     'deep_cost':DeepCost,

@@ -49,14 +49,14 @@ class GetLoss():
         # self.max_num_bc = cfg['max_circle_num']
         # self.default_circle_interval = cfg['default_circle_interval']
         lcfg = cfg['loss']
-        self.loss_CE = lcfg['CrossE'] if 'CrossE' in lcfg.keys() else True
-        self.loss_var = lcfg['Variance'] if 'Variance' in lcfg.keys() else True
-        self.loss_reg = lcfg['CostReg'] if 'CostReg' in lcfg.keys() else True
-        self.loss_GT_l1 = lcfg['MinGt'] if 'MinGt' in lcfg.keys() else True
-        self.loss_idv = lcfg['IDV'] if 'IDV' in lcfg.keys() else True
+        self.loss_CE = lcfg['loss_CE'] if 'loss_CE' in lcfg.keys() else True
+        self.loss_var = lcfg['loss_var'] if 'loss_var' in lcfg.keys() else True
+        self.loss_reg = lcfg['loss_reg'] if 'loss_reg' in lcfg.keys() else True
+        self.loss_GT_l1 = lcfg['loss_GT_l1'] if 'loss_GT_l1' in lcfg.keys() else True
+        self.loss_idv = lcfg['loss_idv'] if 'loss_idv' in lcfg.keys() else True
 
-        self.loss_END = lcfg['END'] if 'END' in lcfg.keys() else True
-        self.loss_cost_GT = lcfg['GTcost'] if 'GTcost' in lcfg.keys() else True
+        self.loss_END = lcfg['loss_END'] if 'loss_END' in lcfg.keys() else True
+        self.loss_cost_GT = lcfg['loss_cost_GT'] if 'loss_cost_GT' in lcfg.keys() else True
 
         # self.loss_goal:
 
@@ -79,7 +79,8 @@ class GetLoss():
                  gt,
                  detailed_gt,
                  gt_risk,
-                #  tb_iters=0
+                 tb_iters=0,
+                 tb_writer=None
                  ):
         """
         riskmap: include sdf, reflane and dynamic prediction and their measures
@@ -100,24 +101,32 @@ class GetLoss():
         # print(traj_result[0].shape)
         # print(gt.shape)
         if self.loss_END:
-            loss += torch.nn.functional.smooth_l1_loss(traj_result[0][:, :,-1,:3],
+            loss_END = torch.nn.functional.smooth_l1_loss(traj_result[0][:, :,-1,:3],
                                      gt[:, 0:1, -1, :3])
+            loss += loss_END
+            tb_writer.add_scalar('loss/'+'loss_END', loss_END.mean(), tb_iters)
 
         if self.loss_GT_l1:
-            loss += torch.nn.functional.smooth_l1_loss(traj_result[0][...,:3], gt[:, 0:1, :, :3])
+            loss_GT_l1 = torch.nn.functional.smooth_l1_loss(traj_result[0][...,:3], gt[:, 0:1, :, :3])
+            loss += loss_GT_l1
+            tb_writer.add_scalar('loss/'+'loss_GT_l1', loss_GT_l1.mean(), tb_iters)
 
         if self.loss_cost_GT:
             # gt_risk, _ = self.get_loss_by_Xu(
             #     detailed_gt,
             #     u
             # )
-            loss += gt_risk.mean()
+            # TODO find why gt risk is negtive
+            loss_cost_GT = gt_risk.mean()
+            loss += loss_cost_GT**2
+            tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iters)
 
         if self.loss_CE:
-            prob = torch.softmax(-sample_risks[..., 10:], dim=0)
-            dis_prob = torch.softmax(-diffXd[..., 10:], dim=0)
+            prob = torch.softmax(-sample_risks[..., 10:], dim=1)
+            dis_prob = torch.softmax(-diffXd[..., 10:], dim=1)
             cls_loss = self.crossE(prob, dis_prob)
             loss += cls_loss
+            tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iters)
 
         # the compliance of L2 diff between Xd and cost diff GT and Xd and GT
         if self.loss_reg:            
@@ -125,11 +134,14 @@ class GetLoss():
             loss_diff = (torch.gather(sample_risks,1,closest_T.indices.unsqueeze(dim=-1).repeat(1,1,self.th)) \
                         -gt_risk.mean(dim=-1))**2
             loss += loss_diff.mean()
+            tb_writer.add_scalar('loss/'+'loss_reg', loss_diff.mean(), tb_iters)
 
         # the cost variance of samples
         if self.loss_var:
             variance = torch.var(sample_risks.mean(dim=-1), dim=1).mean()
-            loss += 1/variance.clamp(1e-1)
+            loss_var = 1/variance.clamp(1e-1)
+            loss += loss_var
+            tb_writer.add_scalar('loss/'+'loss_var', loss_var.mean(), tb_iters)
 
         # velocity difference between GT and NN generated
         # if self.loss_idv:

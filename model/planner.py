@@ -1,6 +1,7 @@
 import sys
 import os
 from typing import List
+from joblib import PrintTime
 import yaml
 import torch
 import theseus as th
@@ -10,9 +11,10 @@ from utils.riskmap.torch_lattice import torchLatticePlanner
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
 from utils.riskmap.utils import convert2detail_state, load_cfg_here
+import matplotlib.pyplot as plt
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
-
+DEBUG=False
 class Planner:
     def __init__(self, device='cuda:0', test=False) -> None:
         self.name = None
@@ -82,6 +84,13 @@ class RiskMapPlanner(Planner):
         # samping
         # sample {traj, control} according to state
         self.sample_plan = self.lattice_planner.get_sample(context)
+        if DEBUG:
+            print(context['current_state'].shape, context['current_state'][0])
+            plt.plot(context['ref_line_info'][0][...,0].cpu(),context['ref_line_info'][0][...,1].cpu())
+            for traj in self.sample_plan['X'][0]:
+                plt.plot(traj[...,0].cpu(),traj[...,1].cpu())
+            plt.axis('equal')
+            plt.show()
         # checking
         # calculate dis
         self.meter = self.map.get_meter(self.sample_plan, context, batch)
@@ -101,7 +110,7 @@ class RiskMapPlanner(Planner):
         i = i.reshape(-1,1,1,1).repeat(1,1,50,4)
         return torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
 
-    def get_loss(self, gt):
+    def get_loss(self, gt, tb_iter=0, tb_writer=None):
         """
         must be called after forward
         """
@@ -114,7 +123,9 @@ class RiskMapPlanner(Planner):
                                              self.plan_result,
                                              gt,
                                              detailed_gt,
-                                             gt_risk
+                                             gt_risk,
+                                             tb_iters=tb_iter,
+                                             tb_writer=tb_writer
                                              )
 
 # model

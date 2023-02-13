@@ -184,7 +184,7 @@ class torchLatticePlanner:
             *torch.norm(self.init_X_state[:,0,3:5],dim=-1,keepdim=True).unsqueeze(-1)
         x = x.unsqueeze(-3).repeat(1,self.make_num_x,1,1)
         dx = torch.linspace(0, (self.th-1)*self.ti, self.th, device=self.device).unsqueeze(-1) # dm/s
-        dx = dx.repeat(btsz,self.make_num_x,1,1)*torch.linspace(-self.make_range_x,
+        dx = dx.repeat(btsz,self.make_num_x,1,1)*torch.linspace(0,
                                                             self.make_range_x,
                                                             self.make_num_x,
                                                             device=self.device).reshape(self.make_num_x,1,1)

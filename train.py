@@ -75,10 +75,10 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         elif planner.name=='risk' and use_planning:
-            plan, prediction = select_future(plans, predictions, scores)
+            _, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
-                "control_variables": plan.view(-1, 100), # initial control sequence
+                # "control_variables": plan.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state,
@@ -87,10 +87,10 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             # print('predict', planner_inputs['predictions'])            
             plan, u = planner.plan(planner_inputs, batch) # control
             # traj = bicycle_model(u, ego[:, -1])[:, :, :3] # traj
-            plan_loss = planner.get_loss(ground_truth[...,0:1,:,:])
+            plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
             # plan_loss += F.smooth_l1_loss(X, ground_truth[:, 0, :, :3])  # avoid gradient explosion
             # plan_loss += F.smooth_l1_loss(X[:, -1], ground_truth[:, 0, -1, :3])
-            loss = plan_loss #+ 1e-3 * plan_cost # planning loss
+            loss += plan_loss #+ 1e-3 * plan_cost # planning loss
         else:
             plan, prediction = select_future(plan_trajs, predictions, scores)
         # except:
@@ -117,14 +117,20 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             )
             sys.stdout.flush()
             tbwriter.add_scalar('loss/'+'0total', loss.mean(), tb_iters)
+            tbwriter.add_scalar('metrics/'+'planADE', metrics[0], tb_iters)
+            tbwriter.add_scalar('metrics/'+'planFDE', metrics[1], tb_iters)
+            tbwriter.add_scalar('metrics/'+'preADE', metrics[2], tb_iters)
+            tbwriter.add_scalar('metrics/'+'preFDE', metrics[3], tb_iters)
+            
+            
             # tbwriter.add_scalar('raw_meter/' + 's0', s0.mean(), self.tb_iters)
             # tbwriter.add_scalar('raw_meter/' + 'v_raw', fut_traj[...,-1].mean(), self.tb_iters)
             # tbwriter.add_scalar('raw_meter/' + 'sample diffXd.mean()', diffXd.mean(), self.tb_iters)
             # tbwriter.add_scalar('raw_meter/' + 'sample costs.mean()', costs.mean(), self.tb_iters)
             # tbwriter.add_scalar('loss_ele/' + 'traj_cost', costs[:,-1].mean(), self.tb_iters)
             if use_planning and it%500==0:
-                torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_tmp.pth')
-                logging.info(f"Model saved in training_log/{args.name}\n")
+                torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_plan.pth')
+                logging.info(f"Planing model saved in training_log/{args.name}\n")
 
         # if use_planning and it%500==0:    
         #     dist.barrier()
@@ -371,7 +377,7 @@ if __name__ == "__main__":
     cfg_file = args.config if args.config else 'config.yaml'
     os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)
     cfg = load_cfg_here()
-    tb_iter = 0
+    tb_iters = 0
     tbwriter = SummaryWriter(
     log_dir=os.path.join(f'training_log/{args.name}', 'tensorboard_logs')
     )

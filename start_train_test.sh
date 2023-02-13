@@ -6,17 +6,18 @@
 # --node_rank=0 \
 python \
 train.py \
---name RISK \
+--name RISK_1 \
 --train_set /workspace/DIPP/dataset/test_tmp \
 --valid_set /workspace/DIPP/dataset/test_tmp \
 --use_planning \
 --seed 3407 \
 --num_workers 24 \
---pretrain_epochs 50 \
+--pretrain_epochs 20 \
 --train_epochs 200 \
 --batch_size 16 \
 --learning_rate 1.5e-4 \
 --device cuda \
+# --ckpt training_log/RISK/model_51_9.9982.pth
 # --local_rank 0 \
 # --world_size 1
 # --ckpt training_log/DIPP/model_1_0.6659.pth \
