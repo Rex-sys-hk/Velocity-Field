@@ -22,6 +22,7 @@ planner:
     name: 'deep_cost'
     TVC: False
     V_dim: 8
+    input_shape: 256
     th: 1
     idv: True
 

@@ -262,7 +262,9 @@ class DeepCost(Meter2Risk):
         #                             )
 
         # No soft max in mlp as the th dim is not seperated
-        input_shape=256
+        # input_shape=256
+        cfg = load_cfg_here()['planner']
+        input_shape = cfg['meter2risk']['input_shape']
         self.beta = nn.Sequential(
                                     nn.Linear(input_shape,64),
                                     nn.LayerNorm(64),
