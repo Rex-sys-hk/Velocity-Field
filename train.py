@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
+import matplotlib.pyplot as plt
 
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
@@ -40,12 +41,12 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
         ref_line_info = batch[4].to(args.local_rank)
         ground_truth = batch[5].to(args.local_rank)
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-        weights = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
+        masks = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
         # predict
         optimizer.zero_grad()
         plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
         plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
-        loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
+        loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
         # plan
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, scores)
@@ -71,7 +72,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         elif planner.name=='risk':
-            _, prediction = select_future(plans, predictions, scores)
+            plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
                 # "control_variables": plan.view(-1, 100), # initial control sequence
@@ -96,7 +97,15 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
         optimizer.step()
 
         # compute metrics
-        metrics = motion_metrics(plan, prediction, ground_truth, weights)
+        # plt.cla()
+        # plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),'r--')
+        # plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(),'b')
+        # prediction_t = prediction*weights
+        # for nei in range(10):
+        #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')
+        #     plt.plot(ground_truth[0,nei+1,...,0].cpu().detach(),ground_truth[0,nei+1,...,1].cpu().detach(),'k')
+        # plt.pause(0.5)
+        metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
         epoch_loss.append(loss.item())
 
@@ -151,17 +160,19 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
         ref_line_info = batch[4].to(args.local_rank)
         ground_truth = batch[5].to(args.local_rank)
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-        weights = torch.ne(ground_truth[:, 1:, :, :3], 0)
+        masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
 
         # predict
         with torch.no_grad():
             plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
             plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
-            loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
+            loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
 
         # plan 
         # try: # to handle both no initialized planner and unsolvable problems
-        if planner.name=='dipp':
+        if not use_planning:
+            plan, prediction = select_future(plan_trajs, predictions, scores)
+        elif planner.name=='dipp' and use_planning:
             plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
@@ -184,7 +195,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
                 plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
                 plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
                 loss += plan_loss + 1e-3 * plan_cost # planning loss
-        if planner.name=='risk':
+        elif planner.name=='risk' and use_planning:
             plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
@@ -199,7 +210,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
                 # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
                 plan_loss += planner.get_loss(ground_truth)
                 loss += plan_loss + 1e-3 * plan_cost # planning loss
-        if planner.name=='base':
+        elif planner.name=='base':
             plan, prediction = select_future(plans, predictions, scores)
             plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
@@ -209,7 +220,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
         #     plan, prediction = select_future(plan_trajs, predictions, scores)
 
         # compute metrics
-        metrics = motion_metrics(plan, prediction, ground_truth, weights)
+        metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
         epoch_loss.append(loss.item())
 
@@ -313,15 +324,15 @@ def model_training():
         # train 
         if planner:
             if epoch < args.pretrain_epochs:
-                args.use_planning = False
+                use_planning = False
             else:
-                args.use_planning = True
+                use_planning = True
         btsz = batch_size if args.use_planning else batch_size*4
         train_loader = DataLoader(train_set, batch_size=btsz, num_workers=args.num_workers,sampler=train_sampler)
         valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
 
-        train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, args.use_planning, epoch)
-        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, args.use_planning, epoch)
+        train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, use_planning, epoch)
+        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, use_planning, epoch)
 
         # save to training log
         if args.local_rank==0:

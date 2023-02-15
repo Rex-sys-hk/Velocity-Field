@@ -48,7 +48,6 @@ class DrivingData(Dataset):
         return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
 
 def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
-    global best_mode
 
     predictions = predictions * weights.unsqueeze(1)
     prediction_distance = torch.norm(predictions[:, :, :, 9::10, :2] - ground_truth[:, None, 1:, 9::10, :2], dim=-1)
@@ -74,6 +73,7 @@ def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
         return 0.5 * prediction_loss + score_loss
 
 def select_future(plans, predictions, scores):
+    best_mode = torch.argmin(scores,dim=-1)
     plan = torch.stack([plans[i, m] for i, m in enumerate(best_mode)])
     prediction = torch.stack([predictions[i, m] for i, m in enumerate(best_mode)])
 
@@ -81,7 +81,7 @@ def select_future(plans, predictions, scores):
 
 def motion_metrics(plan_trajectory, prediction_trajectories, ground_truth_trajectories, weights):
     prediction_trajectories = prediction_trajectories * weights
-    plan_distance = torch.norm(plan_trajectory[..., :2] - ground_truth_trajectories[..., 0:1, :, :2], dim=-1)
+    plan_distance = torch.norm(plan_trajectory[..., :2] - ground_truth_trajectories[..., 0, :, :2], dim=-1)
     prediction_distance = torch.norm(prediction_trajectories[:, :, :, :2] - ground_truth_trajectories[:, 1:, :, :2], dim=-1)
 
     # planning

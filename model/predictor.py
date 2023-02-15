@@ -122,14 +122,7 @@ class Agent2Map(nn.Module):
         crosswalks_actor = [self.crosswalk_attention(query, crosswalks[:, i], crosswalks[:, i]) for i in range(crosswalks.shape[1])]
         map_actor = torch.cat(lanes_actor+crosswalks_actor, dim=1)
         output = self.map_attention(query, map_actor, map_actor, mask).squeeze(2)
-        # print('Agent2Map')
-        # print(len(lanes_actor))
-        # print(len(crosswalks_actor))
-        # print(lanes_actor[0].shape)
-        # print(crosswalks_actor[0].shape)
-        # print(map_actor.shape)
-        # print(output.shape)
-        # print('Agent2Map_END')
+
         return map_actor, output 
 
 # Decoders
