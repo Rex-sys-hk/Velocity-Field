@@ -264,14 +264,12 @@ class Predictor(nn.Module):
         plans, cost_function_weights = self.plan(agent_map[:, :, 0], agent_agent[:, 0])
         predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
         scores = self.score(map_feature, agent_agent, agent_map)
+        # to be compatible with risk map
         self.latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
         self.meter2risk_local_instance.set_latent_feature(self.latent_feature)
         
         return plans, predictions, scores, cost_function_weights
     
-    # def get_latent_feature(self):
-    #     return self.latent_feature
-
 
 if __name__ == "__main__":
     # set up model

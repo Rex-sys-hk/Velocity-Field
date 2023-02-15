@@ -275,8 +275,7 @@ def safety(optim_vars, aux_vars):
     ego = bicycle_model(control, ego_current_state)
     ego_len, ego_width = ego_current_state[:, -3], ego_current_state[:, -2]
     neighbors_current_state = current_state[:, 1:]
-    neighbors_len, neighbors_width = neighbors_current_state[..., -
-                                                             3], neighbors_current_state[..., -2]
+    neighbors_len, neighbors_width = neighbors_current_state[..., -3], neighbors_current_state[..., -2]
 
     l_eps = (ego_width.unsqueeze(1) + neighbors_width)/2 + 0.5
     frenet_neighbors = torch.stack([project_to_frenet_frame(

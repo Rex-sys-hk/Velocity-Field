@@ -40,9 +40,9 @@ class UnifiedGaussianCost(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
         super().__init__()
         self.device = device
-        th = th if TVC else 1
-        self.lmda = nn.Parameter(torch.ones(th, V_dim, device=self.device))
-        self.beta = nn.Parameter(torch.ones(th, V_dim, device=self.device))
+        th = th if self.TVC else 1
+        self.lmda = nn.Parameter(torch.ones(th, self.V_dim, device=self.device))
+        self.beta = nn.Parameter(torch.ones(th, self.V_dim, device=self.device))
 
     def forward(self,raw_meter):
         """

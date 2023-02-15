@@ -1,5 +1,3 @@
-from joblib import PrintTime
-from sklearn.utils import shuffle
 import torch
 import sys
 import csv
@@ -7,7 +5,6 @@ import time
 import argparse
 import logging
 import os
-import yaml
 import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -15,9 +12,8 @@ from torch import nn, optim
 from utils.train_utils import *
 from utils.riskmap.utils import load_cfg_here
 from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
-from model.meter2risk import Meter2Risk, CostModules
 from model.predictor import Predictor
-from torch.utils.data import DataLoader, Sampler, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
@@ -51,8 +47,9 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
         plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
         loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
         # plan
-        # try: # to handle both no initialized planner and unsolvable problems
-        if planner.name=='dipp' and use_planning:
+        if not use_planning:
+            plan, prediction = select_future(plan_trajs, predictions, scores)
+        elif planner.name=='dipp':
             plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
@@ -73,7 +70,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
-        elif planner.name=='risk' and use_planning:
+        elif planner.name=='risk':
             _, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
@@ -92,10 +89,6 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
             loss += plan_loss
-        else:
-            plan, prediction = select_future(plan_trajs, predictions, scores)
-        # except:
-        #     plan, prediction = select_future(plan_trajs, predictions, scores)
 
         # loss backward
         loss.backward()
@@ -117,19 +110,12 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
             )
             sys.stdout.flush()
-            tbwriter.add_scalar('train/'+'epoch_loss', loss.mean(), epoch)
-            tbwriter.add_scalar('loss/'+'0total', loss.mean(), tb_iters)
-            tbwriter.add_scalar('metrics/'+'planADE', metrics[0], tb_iters)
-            tbwriter.add_scalar('metrics/'+'planFDE', metrics[1], tb_iters)
-            tbwriter.add_scalar('metrics/'+'preADE', metrics[2], tb_iters)
-            tbwriter.add_scalar('metrics/'+'preFDE', metrics[3], tb_iters)
+            tbwriter.add_scalar('train/'+'iter_loss', loss.mean(), tb_iters)
+            tbwriter.add_scalar('train/metrics/'+'planADE', metrics[0], tb_iters)
+            tbwriter.add_scalar('train/metrics/'+'planFDE', metrics[1], tb_iters)
+            tbwriter.add_scalar('train/metrics/'+'preADE', metrics[2], tb_iters)
+            tbwriter.add_scalar('train/metrics/'+'preFDE', metrics[3], tb_iters)
             
-            
-            # tbwriter.add_scalar('raw_meter/' + 's0', s0.mean(), self.tb_iters)
-            # tbwriter.add_scalar('raw_meter/' + 'v_raw', fut_traj[...,-1].mean(), self.tb_iters)
-            # tbwriter.add_scalar('raw_meter/' + 'sample diffXd.mean()', diffXd.mean(), self.tb_iters)
-            # tbwriter.add_scalar('raw_meter/' + 'sample costs.mean()', costs.mean(), self.tb_iters)
-            # tbwriter.add_scalar('loss_ele/' + 'traj_cost', costs[:,-1].mean(), self.tb_iters)
             if use_planning and it%500==0:
                 torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_plan.pth')
                 logging.info(f"Planing model saved in training_log/{args.name}\n")
@@ -142,7 +128,8 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nplannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
-        
+    tbwriter.add_scalar('train/'+'epoch_loss', np.mean(epoch_loss), epoch)
+    
     return np.mean(epoch_loss), epoch_metrics
 
 def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
@@ -152,8 +139,10 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
     size = len(data_loader.dataset)
     predictor.eval()
     start_time = time.time()
-
-    for batch in data_loader:
+    iter_base = size*epoch/args.batch_size
+    tb_iters = iter_base
+    for it, batch in enumerate(data_loader):
+        tb_iters+=it
         # prepare data
         ego = batch[0].to(args.local_rank)
         neighbors = batch[1].to(args.local_rank)
@@ -171,53 +160,53 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
             loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, weights, use_planning) # multi-future multi-agent loss
 
         # plan 
-        try: # to handle both no initialized planner and unsolvable problems
-            if planner.name=='dipp':
-                plan, prediction = select_future(plans, predictions, scores)
+        # try: # to handle both no initialized planner and unsolvable problems
+        if planner.name=='dipp':
+            plan, prediction = select_future(plans, predictions, scores)
 
-                planner_inputs = {
-                    "control_variables": plan.view(-1, 100), # generate initial control sequence
-                    "predictions": prediction, # generate predictions for surrounding vehicles 
-                    "ref_line_info": ref_line_info,
-                    "current_state": current_state
-                }
+            planner_inputs = {
+                "control_variables": plan.view(-1, 100), # generate initial control sequence
+                "predictions": prediction, # generate predictions for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state
+            }
 
-                for i in range(cost_function_weights.shape[1]):
-                    planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+            for i in range(cost_function_weights.shape[1]):
+                planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
-                with torch.no_grad():
-                    final_values, info = planner.layer.forward(planner_inputs)
+            with torch.no_grad():
+                final_values, info = planner.layer.forward(planner_inputs)
 
-                    plan = final_values["control_variables"].view(-1, 50, 2)
-                    plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
-
-                    plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-                    plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-                    plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
-                    loss += plan_loss + 1e-3 * plan_cost # planning loss
-            if planner.name=='risk':
-                plan, prediction = select_future(plans, predictions, scores)
-
-                planner_inputs = {
-                    "control_variables": plan.view(-1, 100), # initial control sequence
-                    "predictions": prediction.detach(), # prediction for surrounding vehicles 
-                    "ref_line_info": ref_line_info,
-                    "current_state": current_state
-                }
-
-                with torch.no_grad():
-                    plan, u = planner.forward(planner_inputs, batch) # control
-                    # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
-                    plan_loss += planner.get_loss(ground_truth)
-                    loss += plan_loss + 1e-3 * plan_cost # planning loss
-            if planner.name=='base':
-                plan, prediction = select_future(plans, predictions, scores)
+                plan = final_values["control_variables"].view(-1, 50, 2)
                 plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
-                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
-                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
-                loss += plan_loss
-        except:
-            plan, prediction = select_future(plan_trajs, predictions, scores)
+
+                plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
+                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
+                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+                loss += plan_loss + 1e-3 * plan_cost # planning loss
+        if planner.name=='risk':
+            plan, prediction = select_future(plans, predictions, scores)
+
+            planner_inputs = {
+                "control_variables": plan.view(-1, 100), # initial control sequence
+                "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state
+            }
+
+            with torch.no_grad():
+                plan, u = planner.forward(planner_inputs, batch) # control
+                # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
+                plan_loss += planner.get_loss(ground_truth)
+                loss += plan_loss + 1e-3 * plan_cost # planning loss
+        if planner.name=='base':
+            plan, prediction = select_future(plans, predictions, scores)
+            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
+            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            loss += plan_loss
+        # except:
+        #     plan, prediction = select_future(plan_trajs, predictions, scores)
 
         # compute metrics
         metrics = motion_metrics(plan, prediction, ground_truth, weights)
@@ -228,13 +217,19 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
         current += batch[0].shape[0]
         sys.stdout.write(f"\rValid Progress: [{current:>6d}/{size:>6d}]  Loss: {np.mean(epoch_loss):>.4f}  {(time.time()-start_time)/current:>.4f}s/sample")
         sys.stdout.flush()
+        
+        tbwriter.add_scalar('valid/'+'iter_loss', loss.mean(), tb_iters)
+        tbwriter.add_scalar('valid/metrics/'+'planADE', metrics[0], tb_iters)
+        tbwriter.add_scalar('valid/metrics/'+'planFDE', metrics[1], tb_iters)
+        tbwriter.add_scalar('valid/metrics/'+'preADE', metrics[2], tb_iters)
+        tbwriter.add_scalar('valid/metrics/'+'preFDE', metrics[3], tb_iters)
 
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nval-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
-    tbwriter.add_scalar('valid/'+'epoch_loss', loss.mean(), epoch)
+    tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
 
     return np.mean(epoch_loss), epoch_metrics
 
@@ -259,7 +254,7 @@ def model_training():
         distributed = True
     except:
         distributed = False
-        print('distributed data parallele initialization failed')
+        print('[WARNING]distributed data parallele initialization failed')
     # set up predictor
     predictor = Predictor(50).to(args.local_rank)
     if distributed:
