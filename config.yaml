@@ -1,5 +1,5 @@
 planner: 
-  name: 'risk'
+  name: 'base'
   time_horizon: 50
   time_interval: 0.1
   feature_count: 9

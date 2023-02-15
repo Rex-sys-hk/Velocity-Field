@@ -14,14 +14,13 @@ from tensorboardX import SummaryWriter
 from torch import nn, optim
 from utils.train_utils import *
 from utils.riskmap.utils import load_cfg_here
-from model.planner import MotionPlanner, Planner,RiskMapPlanner
+from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
 from model.meter2risk import Meter2Risk, CostModules
 from model.predictor import Predictor
 from torch.utils.data import DataLoader, Sampler, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
-# TODO NOTE HACK FIXME
 
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
@@ -84,13 +83,15 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
                 "current_state": current_state,
                 # "latent_feature": predictor.module.get_latent_feature()
             }
-            # print('predict', planner_inputs['predictions'])            
             plan, u = planner.plan(planner_inputs, batch) # control
-            # traj = bicycle_model(u, ego[:, -1])[:, :, :3] # traj
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
-            # plan_loss += F.smooth_l1_loss(X, ground_truth[:, 0, :, :3])  # avoid gradient explosion
-            # plan_loss += F.smooth_l1_loss(X[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss #+ 1e-3 * plan_cost # planning loss
+        elif planner.name=='base':
+            plan, prediction = select_future(plans, predictions, scores)
+            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
+            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            loss += plan_loss
         else:
             plan, prediction = select_future(plan_trajs, predictions, scores)
         # except:
@@ -208,6 +209,12 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning):
                     # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
                     plan_loss += planner.get_loss(ground_truth)
                     loss += plan_loss + 1e-3 * plan_cost # planning loss
+            if planner.name=='base':
+                plan, prediction = select_future(plans, predictions, scores)
+                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+                plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
+                plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+                loss += plan_loss
         except:
             plan, prediction = select_future(plan_trajs, predictions, scores)
 
@@ -266,11 +273,13 @@ def model_training():
             trajectory_len, feature_len = 50, 9
             planner = MotionPlanner(trajectory_len, feature_len, device= args.local_rank)
         if cfg['planner']['name'] == 'risk':
-            # trajectory_len, feature_len = 50, 9
+            # to deal with DDP different saving format
             if distributed:
                 planner = RiskMapPlanner(predictor.module.meter2risk, device= args.local_rank)
             else:
-                planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)    
+                planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)
+        if cfg['planner']['name'] == 'base':
+            planner = BasePlanner(device= args.local_rank)
     else:
         planner = None
 

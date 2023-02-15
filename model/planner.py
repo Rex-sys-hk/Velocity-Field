@@ -23,6 +23,11 @@ class Planner:
         self.test = test
 
 
+class BasePlanner(Planner):
+    def __init__(self,device, test=False) -> None:
+        super().__init__(device, test)
+        self.name = 'base'
+
 class MotionPlanner(Planner):
     def __init__(self, trajectory_len, feature_len, device='cuda:0', test=False):
         super().__init__(device, test)
