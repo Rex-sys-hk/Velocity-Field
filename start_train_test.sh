@@ -3,7 +3,7 @@
  # @Author: rxin rxin@connect.ust.hk
  # @Date: 2023-02-14 20:49:05
  # @LastEditors: rxin rxin@connect.ust.hk
- # @LastEditTime: 2023-02-15 16:48:41
+ # @LastEditTime: 2023-02-15 18:53:49
  # @FilePath: /DIPP/start_train_test.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 
@@ -14,13 +14,13 @@
 # --node_rank=0 \
 python \
 train.py \
---name BASELINE \
+--name DIPP_test \
 --train_set /workspace/DIPP/dataset/test_tmp \
 --valid_set /workspace/DIPP/dataset/test_tmp \
 --use_planning \
 --seed 3407 \
 --num_workers 24 \
---pretrain_epochs 30 \
+--pretrain_epochs 10 \
 --train_epochs 200 \
 --batch_size 16 \
 --learning_rate 1.5e-4 \

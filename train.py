@@ -117,6 +117,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
             )
             sys.stdout.flush()
+            tbwriter.add_scalar('train/'+'epoch_loss', loss.mean(), epoch)
             tbwriter.add_scalar('loss/'+'0total', loss.mean(), tb_iters)
             tbwriter.add_scalar('metrics/'+'planADE', metrics[0], tb_iters)
             tbwriter.add_scalar('metrics/'+'planFDE', metrics[1], tb_iters)
@@ -144,7 +145,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
         
     return np.mean(epoch_loss), epoch_metrics
 
-def valid_epoch(data_loader, predictor, planner: Planner, use_planning):
+def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
     epoch_loss = []
     epoch_metrics = []
     current = 0
@@ -233,6 +234,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning):
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nval-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
+    tbwriter.add_scalar('valid/'+'epoch_loss', loss.mean(), epoch)
 
     return np.mean(epoch_loss), epoch_metrics
 
@@ -324,7 +326,7 @@ def model_training():
         valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
 
         train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, args.use_planning, epoch)
-        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, args.use_planning)
+        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, args.use_planning, epoch)
 
         # save to training log
         if args.local_rank==0:
