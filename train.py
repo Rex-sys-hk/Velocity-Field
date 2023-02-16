@@ -29,10 +29,10 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
     size = len(data_loader.dataset)
     predictor.train()
     start_time = time.time()
-    iter_base = size*epoch/args.batch_size
+    iter_base = (size/data_loader.batch_size)*epoch
     tb_iters = iter_base
     for it,batch in enumerate(data_loader):
-        tb_iters += it
+        tb_iters += 1
         # prepare data
         ego = batch[0].to(args.local_rank)
         neighbors = batch[1].to(args.local_rank)
@@ -137,7 +137,11 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nplannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
-    tbwriter.add_scalar('train/'+'epoch_loss', np.mean(epoch_loss), epoch)
+    tbwriter.add_scalar('train/'+'plannerADE', np.mean(plannerADE), epoch)
+    tbwriter.add_scalar('train/'+'plannerFDE', np.mean(plannerFDE), epoch)
+    tbwriter.add_scalar('train/'+'predictorADE', np.mean(predictorADE), epoch)
+    tbwriter.add_scalar('train/'+'predictorFDE', np.mean(predictorFDE), epoch)
+
     
     return np.mean(epoch_loss), epoch_metrics
 
@@ -148,10 +152,10 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
     size = len(data_loader.dataset)
     predictor.eval()
     start_time = time.time()
-    iter_base = size*epoch/args.batch_size
+    iter_base = (size/data_loader.batch_size)*epoch
     tb_iters = iter_base
     for it, batch in enumerate(data_loader):
-        tb_iters+=it
+        tb_iters+=1
         # prepare data
         ego = batch[0].to(args.local_rank)
         neighbors = batch[1].to(args.local_rank)
@@ -241,7 +245,10 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nval-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
     tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
-
+    tbwriter.add_scalar('valid/'+'plannerADE', np.mean(plannerADE), epoch)
+    tbwriter.add_scalar('valid/'+'plannerFDE', np.mean(plannerFDE), epoch)
+    tbwriter.add_scalar('valid/'+'predictorADE', np.mean(predictorADE), epoch)
+    tbwriter.add_scalar('valid/'+'predictorFDE', np.mean(predictorFDE), epoch)
     return np.mean(epoch_loss), epoch_metrics
 
 def model_training():
