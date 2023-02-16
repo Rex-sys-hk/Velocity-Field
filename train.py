@@ -172,7 +172,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
         # try: # to handle both no initialized planner and unsolvable problems
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, scores)
-        elif planner.name=='dipp' and use_planning:
+        elif planner.name=='dipp':
             plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {
@@ -195,7 +195,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
                 plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
                 plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
                 loss += plan_loss + 1e-3 * plan_cost # planning loss
-        elif planner.name=='risk' and use_planning:
+        elif planner.name=='risk':
             plan, prediction = select_future(plans, predictions, scores)
 
             planner_inputs = {

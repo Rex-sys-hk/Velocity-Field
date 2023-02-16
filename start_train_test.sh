@@ -3,7 +3,7 @@
  # @Author: rxin rxin@connect.ust.hk
  # @Date: 2023-02-14 20:49:05
  # @LastEditors: rxin rxin@connect.ust.hk
- # @LastEditTime: 2023-02-16 00:12:57
+ # @LastEditTime: 2023-02-16 10:44:20
  # @FilePath: /DIPP/start_train_test.sh
  # @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 ### 

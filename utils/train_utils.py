@@ -73,7 +73,7 @@ def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
         return 0.5 * prediction_loss + score_loss
 
 def select_future(plans, predictions, scores):
-    best_mode = torch.argmin(scores,dim=-1)
+    best_mode = torch.argmax(scores,dim=-1)
     plan = torch.stack([plans[i, m] for i, m in enumerate(best_mode)])
     prediction = torch.stack([predictions[i, m] for i, m in enumerate(best_mode)])
 
