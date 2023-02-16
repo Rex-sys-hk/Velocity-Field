@@ -86,8 +86,7 @@ def motion_metrics(plan_trajectory, prediction_trajectories, ground_truth_trajec
 
     # planning
     plannerADE = torch.mean(plan_distance)
-    plannerFDE = torch.mean(plan_distance[..., -1,:])
-    
+    plannerFDE = torch.mean(plan_distance[..., -1])
     # prediction
     predictorADE = torch.mean(prediction_distance, dim=-1)
     predictorADE = torch.masked_select(predictorADE, weights[:, :, 0, 0])

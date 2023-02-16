@@ -206,7 +206,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
             }
 
             with torch.no_grad():
-                plan, u = planner.forward(planner_inputs, batch) # control
+                plan, u = planner.plan(planner_inputs, batch) # control
                 # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
                 plan_loss += planner.get_loss(ground_truth)
                 loss += plan_loss + 1e-3 * plan_cost # planning loss
@@ -300,7 +300,7 @@ def model_training():
             predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
         except:
             predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
-    
+        print(f'ckpt successful loaded from {args.ckpt}')
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=4, gamma=0.5)

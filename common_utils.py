@@ -2,12 +2,13 @@
 Author: rxin rxin@connect.ust.hk
 Date: 2023-02-16 15:19:45
 LastEditors: rxin rxin@connect.ust.hk
-LastEditTime: 2023-02-16 15:19:45
+LastEditTime: 2023-02-16 20:35:08
 FilePath: /DIPP/common_utils.py
 Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 '''
 import torch
-
+model_selection = {}
+loss_selection = {}
 
 def save_checkpoint(epoch, save_name, cfg, model):
     """ Save model to file. """
