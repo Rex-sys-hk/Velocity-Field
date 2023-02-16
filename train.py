@@ -124,10 +124,6 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             tbwriter.add_scalar('train/metrics/'+'planFDE', metrics[1], tb_iters)
             tbwriter.add_scalar('train/metrics/'+'preADE', metrics[2], tb_iters)
             tbwriter.add_scalar('train/metrics/'+'preFDE', metrics[3], tb_iters)
-            
-            if use_planning and it%500==0:
-                torch.save(predictor.state_dict(), f'training_log/{args.name}/model_{epoch}_plan.pth')
-                logging.info(f"Planing model saved in training_log/{args.name}\n")
 
         # if use_planning and it%500==0:    
         #     dist.barrier()
