@@ -4,7 +4,6 @@ import re
 from .car import pi_2_pi
 from torch import device, nn
 import torch
-from pyquaternion import Quaternion
 # from riskmap_generator.planning.params_generator import ParamGenerator
 import matplotlib.pyplot as plt
 import time

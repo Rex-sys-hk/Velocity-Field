@@ -11,8 +11,9 @@ import time
 from .utils import convert2detail_state,load_cfg_here, bicycle_model
 try:
     from .mpp.lib.frenet import FrenetSampler
-except ImportError:
-    raise
+except:
+    # print('[WARNING] FrenetSampler is not implemented')
+    pass
 
 from .utils import has_nan
 

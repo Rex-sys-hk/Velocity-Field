@@ -4,7 +4,11 @@ from typing import List
 from joblib import PrintTime
 import yaml
 import torch
-import theseus as th
+try:
+    import theseus as th
+except:
+    # print('[WARNING] theseus is not implemented')
+    pass
 from utils.riskmap.getloss import GetLoss
 from utils.train_utils import project_to_frenet_frame
 from utils.riskmap.torch_lattice import torchLatticePlanner
