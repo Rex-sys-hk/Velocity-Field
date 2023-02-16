@@ -8,3 +8,4 @@ training_log/
 testing_log/
 start_train.sh
 utils/riskmap/mpp/lib/build/
+start_train_test.ps1
