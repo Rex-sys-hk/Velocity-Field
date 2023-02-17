@@ -104,12 +104,14 @@ class GetLoss():
             loss_END = torch.nn.functional.smooth_l1_loss(traj_result[0][:, :,-1,:3],
                                      gt[:, 0:1, -1, :3])
             loss += loss_END
-            tb_writer.add_scalar('loss/'+'loss_END', loss_END.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_END', loss_END.mean(), tb_iters)
 
         if self.loss_GT_l1:
             loss_GT_l1 = torch.nn.functional.smooth_l1_loss(traj_result[0][...,:3], gt[:, 0:1, :, :3])
             loss += loss_GT_l1
-            tb_writer.add_scalar('loss/'+'loss_GT_l1', loss_GT_l1.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_GT_l1', loss_GT_l1.mean(), tb_iters)
 
         if self.loss_cost_GT:
             # gt_risk, _ = self.get_loss_by_Xu(
@@ -119,14 +121,16 @@ class GetLoss():
             # TODO find why gt risk is negtive
             loss_cost_GT = gt_risk.mean()
             loss += loss_cost_GT**2
-            tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iters)
 
         if self.loss_CE:
             prob = torch.softmax(-sample_risks[..., 10:], dim=1)
             dis_prob = torch.softmax(-diffXd[..., 10:], dim=1)
             cls_loss = self.crossE(prob, dis_prob)
             loss += cls_loss
-            tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iters)
 
         # the compliance of L2 diff between Xd and cost diff GT and Xd and GT
         if self.loss_reg:            
@@ -134,14 +138,16 @@ class GetLoss():
             loss_diff = (torch.gather(sample_risks,1,closest_T.indices.unsqueeze(dim=-1).repeat(1,1,self.th)) \
                         -gt_risk.mean(dim=-1))**2
             loss += loss_diff.mean()
-            tb_writer.add_scalar('loss/'+'loss_reg', loss_diff.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_reg', loss_diff.mean(), tb_iters)
 
         # the cost variance of samples
         if self.loss_var:
             variance = torch.var(sample_risks.mean(dim=-1), dim=1).mean()
             loss_var = 1/variance.clamp(1e-1)
             loss += loss_var
-            tb_writer.add_scalar('loss/'+'loss_var', loss_var.mean(), tb_iters)
+            if tb_writer:
+                tb_writer.add_scalar('loss/'+'loss_var', loss_var.mean(), tb_iters)
 
         # velocity difference between GT and NN generated
         # if self.loss_idv:

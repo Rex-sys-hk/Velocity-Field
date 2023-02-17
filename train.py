@@ -85,8 +85,8 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
             loss += plan_loss #+ 1e-3 * plan_cost # planning loss
         elif planner.name=='base':
-            plan, prediction = select_future(plans, predictions, scores)
-            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+            plan, prediction = select_future(plan_trajs, predictions, scores)
+            # plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
             loss += plan_loss
@@ -133,6 +133,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nplannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
+    tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
     tbwriter.add_scalar('train/'+'plannerADE', np.mean(plannerADE), epoch)
     tbwriter.add_scalar('train/'+'plannerFDE', np.mean(plannerFDE), epoch)
     tbwriter.add_scalar('train/'+'predictorADE', np.mean(predictorADE), epoch)
@@ -208,8 +209,8 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
             with torch.no_grad():
                 plan, u = planner.plan(planner_inputs, batch) # control
                 # plan = bicycle_model(plan, ego[:, -1])[:, :, :3] # traj
-                plan_loss += planner.get_loss(ground_truth)
-                loss += plan_loss + 1e-3 * plan_cost # planning loss
+                plan_loss = planner.get_loss(ground_truth[...,0:1,:,:])
+                loss += plan_loss # planning loss
         elif planner.name=='base':
             plan, prediction = select_future(plans, predictions, scores)
             plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
@@ -303,7 +304,7 @@ def model_training():
         print(f'ckpt successful loaded from {args.ckpt}')
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=4, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
 
     # training parameters
     train_epochs = args.train_epochs
