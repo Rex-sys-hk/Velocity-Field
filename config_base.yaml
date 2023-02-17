@@ -1,3 +1,7 @@
+model_cfg:
+  name: 'risk'
+  future_steps: 50
+
 planner: 
   name: 'dipp'
   time_horizon: 50
