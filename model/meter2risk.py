@@ -1,7 +1,5 @@
 # select Cost mode here
 # tvc is a module can be cused in each mode
-from difflib import context_diff
-from turtle import forward
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -322,7 +320,7 @@ class DeepCost(Meter2Risk):
         batch, sample_num, th, items = raw_meters.shape
 
         # create cost container
-        cost = torch.zeros((batch,sample_num,th,self.map_elements+self.u_dim+self.target_v_dim),device=self.device)
+        cost = torch.zeros((batch,sample_num,th,self.map_elements+self.u_dim+self.target_v_dim),device=raw_meters.device)
         if len(raw_meters.shape)!=3:
             ValueError('raw_meter in shape', raw_meters.shape, 'which should be in 3 dim')
 

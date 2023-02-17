@@ -1,6 +1,5 @@
 import torch
-from torch import nn
-import torch.nn.functional as F
+from torch import device, nn
 from utils.riskmap.utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
 
@@ -193,8 +192,11 @@ class Score(nn.Module):
 
 # Build predictor
 class Predictor(nn.Module):
-    def __init__(self, future_steps):
+    def __init__(self, name:str = 'dipp', future_steps = 50):
         super(Predictor, self).__init__()
+        self.name = 'dipp'
+        if self.name != name:
+            print('[WARNING]: Module name and config name different')
         self._future_steps = future_steps
 
         # agent layer
@@ -214,11 +216,76 @@ class Predictor(nn.Module):
         self.plan = AVDecoder(self._future_steps)
         self.predict = AgentDecoder(self._future_steps)
         self.score = Score()
-        # to be compatible with risk map 
+
+    def forward(self, ego, neighbors, map_lanes, map_crosswalks):
+        # actors
+        ego_actor = self.vehicle_net(ego)
+        vehicles = torch.stack([self.vehicle_net(neighbors[:, i]) for i in range(10)], dim=1) 
+        pedestrians = torch.stack([self.pedestrian_net(neighbors[:, i]) for i in range(10)], dim=1) 
+        cyclists = torch.stack([self.cyclist_net(neighbors[:, i]) for i in range(10)], dim=1)
+        neighbor_actors = torch.where(neighbors[:, :, -1, -1].unsqueeze(2)==2, pedestrians, vehicles)
+        neighbor_actors = torch.where(neighbors[:, :, -1, -1].unsqueeze(2)==3, cyclists, neighbor_actors)
+        actors = torch.cat([ego_actor.unsqueeze(1), neighbor_actors], dim=1)
+        actor_mask = torch.eq(torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1), 0)[:, :, -1, -1]
+
+        # maps
+        lane_feature = self.lane_net(map_lanes)
+        crosswalk_feature = self.crosswalk_net(map_crosswalks)
+        lane_mask = torch.eq(map_lanes, 0)[:, :, :, 0, 0]
+        crosswalk_mask = torch.eq(map_crosswalks, 0)[:, :, :, 0, 0]
+        map_mask = torch.cat([lane_mask, crosswalk_mask], dim=2)
+        map_mask[:, :, 0] = False # prevent nan
+        
+        # actor to actor
+        agent_agent = self.agent_agent(actors, actor_mask)
+        
+        # map to actor
+        map_feature = []
+        agent_map = []
+        for i in range(actors.shape[1]):
+            output = self.agent_map(agent_agent[:, i], lane_feature[:, i], crosswalk_feature[:, i], map_mask[:, i])
+            map_feature.append(output[0])
+            agent_map.append(output[1])
+
+        map_feature = torch.stack(map_feature, dim=1)
+        agent_map = torch.stack(agent_map, dim=2)
+
+        # plan + prediction 
+        plans, cost_function_weights = self.plan(agent_map[:, :, 0], agent_agent[:, 0])
+        predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
+        scores = self.score(map_feature, agent_agent, agent_map)
+        
+        return plans, predictions, scores, cost_function_weights
+
+    
+class RiskMapPre(nn.Module):
+    def __init__(self, name:str = 'risk', future_steps = 50):
+        super(RiskMapPre, self).__init__()
+        self.name = 'risk'
+        if self.name != name:
+            print('[WARNING]: Module name and config name different')
+        self._future_steps = future_steps
         cfg = load_cfg_here()
-        self.meter2risk = [CostModules[cfg['planner']['meter2risk']['name']]()]
-        self.meter2risk_local_instance: Meter2Risk = self.meter2risk[0]
-        self.latent_feature = None
+        self.cfg = cfg
+        # agent layer
+        self.vehicle_net = AgentEncoder()
+        self.pedestrian_net = AgentEncoder()
+        self.cyclist_net = AgentEncoder()
+
+        # map layer
+        self.lane_net = LaneEncoder()
+        self.crosswalk_net = CrosswalkEncoder()
+        
+        # attention layers
+        self.agent_map = Agent2Map()
+        self.agent_agent = Agent2Agent()
+
+        # decode layers
+        self.plan = AVDecoder(self._future_steps)
+        self.predict = AgentDecoder(self._future_steps)
+        self.score = Score()
+
+        self.meter2risk: Meter2Risk = CostModules[cfg['planner']['meter2risk']['name']]()
 
     def forward(self, ego, neighbors, map_lanes, map_crosswalks):
         # actors
@@ -258,11 +325,10 @@ class Predictor(nn.Module):
         predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
         scores = self.score(map_feature, agent_agent, agent_map)
         # to be compatible with risk map
-        self.latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
-        self.meter2risk_local_instance.set_latent_feature(self.latent_feature)
+        latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
+        self.meter2risk.set_latent_feature(latent_feature)
         
         return plans, predictions, scores, cost_function_weights
-    
 
 if __name__ == "__main__":
     # set up model

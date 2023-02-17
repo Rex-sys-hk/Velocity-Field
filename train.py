@@ -9,6 +9,7 @@ import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch import nn, optim
+from common_utils import load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
 from utils.riskmap.utils import load_cfg_here
 from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
@@ -22,7 +23,7 @@ import matplotlib.pyplot as plt
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
-def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, use_planning, epoch):
+def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, use_planning, epoch, distributed = False):
     epoch_loss = []
     epoch_metrics = []
     current = 0
@@ -111,7 +112,7 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
 
 
         # logging and show loss
-        if args.local_rank==0:
+        if args.local_rank==0 or not distributed:
             current += batch[0].shape[0]
             sys.stdout.write(f"\rTrain Progress: [{current:>6d}/{size:>6d}] \
             Loss: {np.mean(epoch_loss):>.4f} \
@@ -133,16 +134,17 @@ def train_epoch(data_loader, predictor:Predictor, planner: Planner, optimizer, u
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nplannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
-    tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
-    tbwriter.add_scalar('train/'+'plannerADE', np.mean(plannerADE), epoch)
-    tbwriter.add_scalar('train/'+'plannerFDE', np.mean(plannerFDE), epoch)
-    tbwriter.add_scalar('train/'+'predictorADE', np.mean(predictorADE), epoch)
-    tbwriter.add_scalar('train/'+'predictorFDE', np.mean(predictorFDE), epoch)
+    if args.local_rank==0 or not distributed:
+        tbwriter.add_scalar('train/'+'epoch_loss', np.mean(epoch_loss), epoch)
+        tbwriter.add_scalar('train/'+'plannerADE', np.mean(plannerADE), epoch)
+        tbwriter.add_scalar('train/'+'plannerFDE', np.mean(plannerFDE), epoch)
+        tbwriter.add_scalar('train/'+'predictorADE', np.mean(predictorADE), epoch)
+        tbwriter.add_scalar('train/'+'predictorFDE', np.mean(predictorFDE), epoch)
 
     
     return np.mean(epoch_loss), epoch_metrics
 
-def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
+def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, distributed=False):
     epoch_loss = []
     epoch_metrics = []
     current = 0
@@ -226,26 +228,27 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch):
         epoch_loss.append(loss.item())
 
         # show progress
-        current += batch[0].shape[0]
-        sys.stdout.write(f"\rValid Progress: [{current:>6d}/{size:>6d}]  Loss: {np.mean(epoch_loss):>.4f}  {(time.time()-start_time)/current:>.4f}s/sample")
-        sys.stdout.flush()
-        
-        tbwriter.add_scalar('valid/'+'iter_loss', loss.mean(), tb_iters)
-        tbwriter.add_scalar('valid/metrics/'+'planADE', metrics[0], tb_iters)
-        tbwriter.add_scalar('valid/metrics/'+'planFDE', metrics[1], tb_iters)
-        tbwriter.add_scalar('valid/metrics/'+'preADE', metrics[2], tb_iters)
-        tbwriter.add_scalar('valid/metrics/'+'preFDE', metrics[3], tb_iters)
+        if args.local_rank==0 or not distributed:
+            current += batch[0].shape[0]
+            sys.stdout.write(f"\rValid Progress: [{current:>6d}/{size:>6d}]  Loss: {np.mean(epoch_loss):>.4f}  {(time.time()-start_time)/current:>.4f}s/sample")
+            sys.stdout.flush()
+            tbwriter.add_scalar('valid/'+'iter_loss', loss.mean(), tb_iters)
+            tbwriter.add_scalar('valid/metrics/'+'planADE', metrics[0], tb_iters)
+            tbwriter.add_scalar('valid/metrics/'+'planFDE', metrics[1], tb_iters)
+            tbwriter.add_scalar('valid/metrics/'+'preADE', metrics[2], tb_iters)
+            tbwriter.add_scalar('valid/metrics/'+'preFDE', metrics[3], tb_iters)
 
     epoch_metrics = np.array(epoch_metrics)
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
     logging.info(f'\nval-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
-    tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
-    tbwriter.add_scalar('valid/'+'plannerADE', np.mean(plannerADE), epoch)
-    tbwriter.add_scalar('valid/'+'plannerFDE', np.mean(plannerFDE), epoch)
-    tbwriter.add_scalar('valid/'+'predictorADE', np.mean(predictorADE), epoch)
-    tbwriter.add_scalar('valid/'+'predictorFDE', np.mean(predictorFDE), epoch)
+    if args.local_rank==0 or not distributed:
+        tbwriter.add_scalar('valid/'+'epoch_loss', np.mean(epoch_loss), epoch)
+        tbwriter.add_scalar('valid/'+'plannerADE', np.mean(plannerADE), epoch)
+        tbwriter.add_scalar('valid/'+'plannerFDE', np.mean(plannerFDE), epoch)
+        tbwriter.add_scalar('valid/'+'predictorADE', np.mean(predictorADE), epoch)
+        tbwriter.add_scalar('valid/'+'predictorFDE', np.mean(predictorFDE), epoch)
     return np.mean(epoch_loss), epoch_metrics
 
 def model_training():
@@ -264,22 +267,26 @@ def model_training():
     args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else args.local_rank
     args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
     set_seed(args.seed+args.local_rank)
+    start_epoch = 0
     try:
         dist.init_process_group(backend="nccl")
         distributed = True
     except:
         distributed = False
         print('[WARNING]distributed data parallele initialization failed')
-    # set up predictor
-    predictor = Predictor(50).to(args.local_rank)
-    if distributed:
-        predictor = DDP(
-                        predictor,
-                        device_ids=[args.local_rank],
-                        output_device=args.local_rank,
-                        find_unused_parameters=True
-                        )
-    # set up planner
+    if not args.ckpt:
+        # set up predictor
+        predictor = predictor_selection[cfg['model_cfg']['name']](**cfg['model_cfg']) #Predictor(50)
+        # set up planner
+    else:
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
+        # try:
+        predictor, start_epoch = load_checkpoint(args.ckpt, map_location)
+            # predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
+        # except:
+            # predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
+        print(f'ckpt successful loaded from {args.ckpt}')
+
     if args.use_planning:
         if cfg['planner']['name'] == 'dipp':
             trajectory_len, feature_len = 50, 9
@@ -295,13 +302,7 @@ def model_training():
     else:
         planner = None
 
-    if args.ckpt:
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
-        try:
-            predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
-        except:
-            predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
-        print(f'ckpt successful loaded from {args.ckpt}')
+    predictor = predictor.to(args.local_rank)
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
@@ -314,6 +315,12 @@ def model_training():
     train_set = DrivingData(args.train_set+'/*')
     valid_set = DrivingData(args.valid_set+'/*')
     if distributed:
+        predictor = DDP(
+                predictor,
+                device_ids=[args.local_rank],
+                output_device=args.local_rank,
+                find_unused_parameters=True
+                )
         train_sampler = DSample(train_set,shuffle=True)
         valid_sampler = DSample(valid_set,shuffle=False)
     else:
@@ -322,7 +329,7 @@ def model_training():
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     # begin training
-    for epoch in range(train_epochs):
+    for epoch in range(start_epoch, train_epochs):
         logging.info(f"Epoch {epoch+1}/{train_epochs}")
         
         # train 
@@ -335,11 +342,11 @@ def model_training():
         train_loader = DataLoader(train_set, batch_size=btsz, num_workers=args.num_workers,sampler=train_sampler)
         valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
 
-        train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, use_planning, epoch)
-        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, use_planning, epoch)
+        train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, use_planning, epoch, distributed)
+        val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, use_planning, epoch, distributed)
 
         # save to training log
-        if args.local_rank==0:
+        if args.local_rank==0 or not distributed:
             log = {'epoch': epoch+1, 'loss': train_loss, 'lr': optimizer.param_groups[0]['lr'], 'val-loss': val_loss, 
                 'train-plannerADE': train_metrics[0], 'train-plannerFDE': train_metrics[1], 
                 'train-predictorADE': train_metrics[2], 'train-predictorFDE': train_metrics[3],
@@ -360,10 +367,11 @@ def model_training():
         scheduler.step()
 
         # save model at the end of epoch
-        if args.local_rank==0:
-            ckpt_file_name = f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth'
-            torch.save(predictor.state_dict(), ckpt_file_name)
-            logging.info(f"Model saved in training_log/{args.name}/{ckpt_file_name}")
+        if args.local_rank==0 or not distributed:
+            ckpt_file_name = f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
+            save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
+            # torch.save(predictor.state_dict(), ckpt_file_name)
+            # logging.info(f"Model saved in {ckpt_file_name}")
         if distributed:
             dist.barrier()
     if distributed:

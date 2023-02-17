@@ -49,11 +49,11 @@ class torchLatticePlanner:
         self.th = cfg['time_horizon']
         self.T = self.th*self.ti
         self.ts = np.linspace(self.ti, self.T, self.th)
-        if not test:
-            self.c_sampler = FrenetSampler(os.getenv('DIPP_ABS_PATH')+'/'+cfg['train_sampler_config'])
-        else:
-            self.c_sampler = FrenetSampler(os.getenv('DIPP_ABS_PATH')+'/'+cfg['test_sampler_config'])
-        self.c_sampler.get_max_num_of_samples()
+        # if not test:
+        #     self.c_sampler = FrenetSampler(os.getenv('DIPP_ABS_PATH')+'/'+cfg['train_sampler_config'])
+        # else:
+        #     self.c_sampler = FrenetSampler(os.getenv('DIPP_ABS_PATH')+'/'+cfg['test_sampler_config'])
+        # self.c_sampler.get_max_num_of_samples()
         self.sampled_traj = None
 
         self.strict_filter = cfg['strict_filter']['enable'] if 'strict_filter' in cfg.keys() else False

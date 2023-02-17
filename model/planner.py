@@ -29,12 +29,12 @@ class Planner:
 
 class BasePlanner(Planner):
     def __init__(self,device, test=False) -> None:
-        super().__init__(device, test)
+        super(BasePlanner, self).__init__(device, test)
         self.name = 'base'
 
 class MotionPlanner(Planner):
     def __init__(self, trajectory_len, feature_len, device='cuda:0', test=False):
-        super().__init__(device, test)
+        super(MotionPlanner, self).__init__(device, test)
         self.name = 'dipp'
 
         self.device = device
@@ -77,15 +77,15 @@ class MotionPlanner(Planner):
 
 
 class RiskMapPlanner(Planner):
-    def __init__(self, meter2risk,device, test=False) -> None:
-        super().__init__(device, test)
+    def __init__(self, meter2risk, device, test=False) -> None:
+        super(RiskMapPlanner, self).__init__(device, test)
         self.name = 'risk'
         self.lattice_planner = torchLatticePlanner(device, test=test)
         self.map = Map(device, test=False)
         self.hand_prefer = torch.softmax(
             torch.tensor(self.cfg['risk_preference'], device=device), dim=0
         )  # handcratfed preference
-        self.meter2risk:List = meter2risk
+        self.meter2risk = meter2risk
         self.loss_calculator = GetLoss(meter2risk,self.map,device)
 
 
@@ -105,7 +105,7 @@ class RiskMapPlanner(Planner):
         self.meter = self.map.get_meter(self.sample_plan, context, batch)
         # directly calculate the realtive position vector and then let meter2risk to estimate risk
         # map to risk sapce(each item value at each time step)
-        self.risks = self.meter2risk[0](self.meter)
+        self.risks = self.meter2risk(self.meter)
         
         # selecting
         self.plan_result = self.selector(self.risks, self.sample_plan)
@@ -125,7 +125,7 @@ class RiskMapPlanner(Planner):
         """
         detailed_gt, u_gt = convert2detail_state(gt)
         raw_meter = self.map.get_vec_map_meter({'X':detailed_gt, 'u':u_gt})
-        gt_risk = self.meter2risk[0](raw_meter)
+        gt_risk = self.meter2risk(raw_meter)
         
         return self.loss_calculator.get_loss(self.sample_plan,
                                              self.risks,
