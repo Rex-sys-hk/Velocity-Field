@@ -85,14 +85,9 @@ class RiskMapPlanner(Planner):
         self.loss_calculator = GetLoss(meter2risk,self.map,device)
 
     def get_sample(self, context, gt_u = None):
-        # self.set_init_state(context['current_state'],context['ref_line_info'])
-        # X,u = self.make_sample()
         btsz = context['init_guess_u'].shape[0]
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         u = (torch.randn([btsz,400,50,2],device = init_guess_u.device)*0.2+1)*init_guess_u.unsqueeze(1)
-        # u = torch.cat([torch.rand([btsz,400,50,1],device=context['current_state'].device)*10-5, 
-        #                torch.rand([btsz,400,50,1],device=context['current_state'].device)*1.2-0.6],
-        #                dim=-1)
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         return {'X':X,'u':u}
@@ -100,7 +95,7 @@ class RiskMapPlanner(Planner):
     def plan(self, context, batch):
         self.context = context
         self.sample_plan = self.get_sample(context)
-        self.meter = self.map.get_meter({'X':self.sample_plan['X'], 'u':self.sample_plan['u']}, context, batch)
+        self.meter = self.map.get_meter(self.sample_plan, context, batch)
         self.risks = self.meter2risk(self.meter)
         self.plan_result = self.selector(self.risks, self.sample_plan)
         return self.plan_result
