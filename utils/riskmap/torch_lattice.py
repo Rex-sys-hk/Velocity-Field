@@ -2,13 +2,14 @@ import sys
 import os
 # from opcode import hasname
 import torch
-from torch import nn
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List
 import time
 
-from .utils import convert2detail_state,load_cfg_here, bicycle_model
+from .utils import load_cfg_here#,bicycle_model
+from ..train_utils import bicycle_model
+
 try:
     from .mpp.lib.frenet import FrenetSampler
 except:
@@ -68,9 +69,16 @@ class torchLatticePlanner:
             self.make_num_y = cfg['making_sample']['make_num_y']
 
     def get_sample(self, context):
-        # TODO change to u sampling with bicycle model
-        self.set_init_state(context['current_state'],context['ref_line_info'])
-        X,u = self.make_sample()
+        # self.set_init_state(context['current_state'],context['ref_line_info'])
+        # X,u = self.make_sample()
+        btsz = context['init_guess_u'].shape[0]
+        init_guess_u = context['init_guess_u']
+        u = (torch.randn([btsz,400,50,2],device = init_guess_u.device)*0.2+1)*init_guess_u.unsqueeze(1)
+        # u = torch.cat([torch.rand([btsz,400,50,1],device=context['current_state'].device)*10-5, 
+        #                torch.rand([btsz,400,50,1],device=context['current_state'].device)*1.2-0.6],
+        #                dim=-1)
+        cur_state = context['current_state'][:,0:1]
+        X = bicycle_model(u,cur_state)
         return {'X':X,'u':u}
 
     def set_init_state(self, s0, reflanes):

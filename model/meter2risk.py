@@ -331,7 +331,8 @@ class DeepCost(Meter2Risk):
         # raw_meters Normalization
         # raw_meters = F.normalize(raw_meters,dim=-1)
         # raw_meters = F.normalize(raw_meters,dim=-2)
-        raw_meters[...,:self.map_elements] = F.normalize(raw_meters[...,:self.map_elements],dim= -1)
+        n_raw_meters = raw_meters.clone()
+        n_raw_meters[...,:self.map_elements] = F.normalize(raw_meters[...,:self.map_elements],dim= -1)
         
         # get params wrt context enc
         beta = self.beta(context_enc).view(batch,-1,self.th,self.map_elements)
@@ -343,7 +344,7 @@ class DeepCost(Meter2Risk):
         target_v = self.target_v(context_enc).reshape(batch,-1,self.th,self.target_v_dim)
         self.target_v_value = target_v
 
-        L_cost = beta*torch.exp(lmda*raw_meters[...,:self.map_elements])
+        L_cost = beta*torch.exp(lmda*n_raw_meters[...,:self.map_elements])
         
         # sdf, reflane, tl
         cost[...,0:self.map_elements] = L_cost
@@ -351,14 +352,14 @@ class DeepCost(Meter2Risk):
         # cost[...,self.map_elements] = raw_meters[...,self.map_elements]
         # u
         cost[...,self.map_elements:self.map_elements+self.u_dim] = \
-            torch.pow(raw_meters[...,self.map_elements:self.map_elements+self.u_dim], 2)\
+            torch.pow(n_raw_meters[...,self.map_elements:self.map_elements+self.u_dim], 2)\
                 *R_mat
         # dv
-        cost[...,-1:] = (raw_meters[...,-1:]-target_v.detach())**2
+        cost[...,-1:] = (n_raw_meters[...,-1:]-target_v.detach())**2
         has_nan(cost)
 
         if writer :
-            writer.add_scalar('raw_meter/' + 'raw3', raw_meters[...,3].mean(), tb_iters)
+            writer.add_scalar('raw_meter/' + 'raw3', n_raw_meters[...,3].mean(), tb_iters)
             writer.add_scalar('cost/' + 'c0', cost[...,0].mean(), tb_iters)
             writer.add_scalar('cost/' + 'c1', cost[...,1].mean(), tb_iters)
             writer.add_scalar('cost/' + 'c2', cost[...,2].mean(), tb_iters)
@@ -835,7 +836,7 @@ class SimpleCostCoef(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
         super().__init__(device)
         self.th = 50
-        self.map_elements = 7
+        self.map_elements = 9
         self.get_coeff = nn.Sequential(
                                 nn.Linear(256,128),
                                 nn.LayerNorm(128),
@@ -845,7 +846,7 @@ class SimpleCostCoef(Meter2Risk):
                                 nn.Linear(128,self.th*self.map_elements),
                                 # nn.GELU(),
                                 # nn.Softmax(dim=-1),
-                                nn.Softsign(),
+                                # nn.Softsign(),
                                 ).to(device)
     
     def forward(self, raw_meters):

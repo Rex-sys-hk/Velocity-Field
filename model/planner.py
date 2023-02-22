@@ -4,21 +4,21 @@ from typing import List
 from joblib import PrintTime
 import yaml
 import torch
+from common_utils import DEBUG
 try:
     import theseus as th
 except:
     # print('[WARNING] theseus is not implemented')
     pass
 from utils.riskmap.getloss import GetLoss
-from utils.train_utils import project_to_frenet_frame
+from utils.train_utils import bicycle_model, project_to_frenet_frame
 from utils.riskmap.torch_lattice import torchLatticePlanner
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
-from utils.riskmap.utils import convert2detail_state, load_cfg_here
+from utils.riskmap.utils import get_u_from_X, load_cfg_here
 import matplotlib.pyplot as plt
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
-DEBUG=False
 class Planner:
     def __init__(self, device='cuda:0', test=False) -> None:
         self.name = None
@@ -77,10 +77,10 @@ class MotionPlanner(Planner):
 
 
 class RiskMapPlanner(Planner):
-    def __init__(self, meter2risk, device, test=False) -> None:
+    def __init__(self, meter2risk: Meter2Risk, device, test=False) -> None:
         super(RiskMapPlanner, self).__init__(device, test)
         self.name = 'risk'
-        self.lattice_planner = torchLatticePlanner(device, test=test)
+        # self.lattice_planner = torchLatticePlanner(device, test=test)
         self.map = Map(device, test=False)
         self.hand_prefer = torch.softmax(
             torch.tensor(self.cfg['risk_preference'], device=device), dim=0
@@ -88,86 +88,72 @@ class RiskMapPlanner(Planner):
         self.meter2risk = meter2risk
         self.loss_calculator = GetLoss(meter2risk,self.map,device)
 
+    def get_sample(self, context, gt_u = None):
+        # self.set_init_state(context['current_state'],context['ref_line_info'])
+        # X,u = self.make_sample()
+        btsz = context['init_guess_u'].shape[0]
+        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
+        u = (torch.randn([btsz,400,50,2],device = init_guess_u.device)*0.2+1)*init_guess_u.unsqueeze(1)
+        # u = torch.cat([torch.rand([btsz,400,50,1],device=context['current_state'].device)*10-5, 
+        #                torch.rand([btsz,400,50,1],device=context['current_state'].device)*1.2-0.6],
+        #                dim=-1)
+        cur_state = context['current_state'][:,0:1]
+        X = bicycle_model(u,cur_state)
+        return {'X':X,'u':u}
 
     def plan(self, context, batch):
         # samping
         # sample {traj, control} according to state
-        self.sample_plan = self.lattice_planner.get_sample(context)
+        self.context = context
+        self.sample_plan = self.get_sample(context)
         if DEBUG:
-            print(context['current_state'].shape, context['current_state'][0])
-            plt.plot(context['ref_line_info'][0][...,0].cpu(),context['ref_line_info'][0][...,1].cpu())
+            plt.plot(context['ref_line_info'][0][...,0].cpu().detach(),context['ref_line_info'][0][...,1].cpu().detach())
             for traj in self.sample_plan['X'][0]:
-                plt.plot(traj[...,0].cpu(),traj[...,1].cpu())
+                plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
             plt.axis('equal')
-            plt.show()
         # checking
         # calculate dis
-        self.meter = self.map.get_meter(self.sample_plan, context, batch)
+        self.meter = self.map.get_meter({'X':self.sample_plan['X'], 'u':self.sample_plan['u']}, context, batch)
         # directly calculate the realtive position vector and then let meter2risk to estimate risk
         # map to risk sapce(each item value at each time step)
         self.risks = self.meter2risk(self.meter)
+        # risks_ = torch.zeros_like(self.risks)
         
-        # selecting
+        # # selecting
         self.plan_result = self.selector(self.risks, self.sample_plan)
-        
+        # print(self.sample_plan['X'].shape)
+        # self.plan_result = self.sample_plan['X'][:,-1], self.sample_plan['u'][:,-1]
         return self.plan_result
 
     def selector(self, risks, sample_plan):
         costs = risks*self.hand_prefer
         i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
-        # btsz, sample_num = i.shape
-        i = i.reshape(-1,1,1,1).repeat(1,1,50,4)
-        return torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
+        X = [sample_plan['X'][ii,i[ii]] for ii in range(i.shape[0])]
+        u = [sample_plan['u'][ii,i[ii]] for ii in range(i.shape[0])]
+        X = torch.stack(X,dim=0)
+        u = torch.stack(u,dim=0)
+        return X,u#torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
 
     def get_loss(self, gt, tb_iter=0, tb_writer=None):
         """
         must be called after forward
         """
-        detailed_gt, u_gt = convert2detail_state(gt)
-        raw_meter = self.map.get_vec_map_meter({'X':detailed_gt, 'u':u_gt})
+        # detailed_gt, u_gt = convert2detail_state(gt)
+        u = get_u_from_X(gt,self.map.ego_current_state)
+        sample = self.get_sample(self.context,u.squeeze(1))
+        raw_meter = self.map.get_vec_map_meter(sample)
         gt_risk = self.meter2risk(raw_meter)
         
-        return self.loss_calculator.get_loss(self.sample_plan,
+        return self.loss_calculator.get_loss(sample,
                                              self.risks,
                                              self.plan_result,
                                              gt,
-                                             detailed_gt,
+                                             gt,
                                              gt_risk,
                                              tb_iters=tb_iter,
                                              tb_writer=tb_writer
                                              )
 
-# model
-
-
-def bicycle_model(control, current_state):
-    dt = 0.1  # discrete time period [s]
-    x_0 = current_state[:, 0]  # vehicle's x-coordinate [m]
-    y_0 = current_state[:, 1]  # vehicle's y-coordinate [m]
-    theta_0 = current_state[:, 2]  # vehicle's heading [rad]
-    # vehicle's velocity [m/s]
-    v_0 = torch.hypot(current_state[:, 3], current_state[:, 4])
-    L = 3.089  # vehicle's wheelbase [m]
-    a = control[:, :, 0]  # vehicle's accleration [m/s^2]
-    delta = control[:, :, 1]  # vehicle's steering [rad]
-
-    # speed
-    v = v_0.unsqueeze(1) + torch.cumsum(a * dt, dim=1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    d_theta = v.detach() * delta / L  # use delta to approximate tan(delta)
-    theta = theta_0.unsqueeze(1) + torch.cumsum(d_theta * dt, dim=-1)
-    theta = torch.fmod(theta, 2*torch.pi)
-
-    # x and y coordniate
-    x = x_0.unsqueeze(1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj
 
 # cost functions
 

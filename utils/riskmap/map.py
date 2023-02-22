@@ -20,6 +20,7 @@ from .utils import (has_nan,
                     steering,
                     steering_change,
                     speed,
+                    vector_field_diff,
                     lane_xyyaw,
                     # lane_theta,
                     red_light_violation,
@@ -74,6 +75,7 @@ class Map(nn.Module):
         self.prediction_dict = None
         self.one_d_sqrt2pi = 0.3989422804014327
         self.debug = debug
+        self.vf_map = None
 
     def get_meter(self, sample_plan, context, batch):
         self.get_new_data(context, batch)
@@ -90,7 +92,10 @@ class Map(nn.Module):
         self.reflane = context['ref_line_info']
         # get prediction
         self.prediction = context['predictions']
-
+        # # init guess
+        # self.init_guess = context['init_guess']
+        # get vf map
+        self.vf_map = context['vf_map']
         # get cross walk
         # self.cross_walk = batch[3].to(device)
 
@@ -121,13 +126,14 @@ class Map(nn.Module):
         # curb_dis = self.dis2curb(traj)
         # cross_dis = self.dis2cross(traj)
         speed_dis = self.dis2speed(traj)
-        
+        map_dis = self.dis2map(traj)
         return {'ref_dis':ref_dis,
                 'pre_dis':pre_dis,
                 'tl_dis':tl_dis,
                 # 'curb_dis':curb_dis,
                 # 'cross_dis':cross_dis,
-                'speed_dis': speed_dis
+                'speed_dis': speed_dis,
+                'map_dis': map_dis,
                 }
 
     def dis2ref(self,traj):
@@ -144,6 +150,10 @@ class Map(nn.Module):
 
     def dis2speed(self,traj):
         return speed(traj['u'], self.ego_current_state)
+    
+    def dis2map(self,traj):
+        return vector_field_diff(traj['X'],self.vf_map)
+
         
     # def dis2cross(self,traj):
     #     # print(self.reflane.shape) # torch.Size([48, 11, 4, 100, 3])

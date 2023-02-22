@@ -1,3 +1,4 @@
+from re import L
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
 import torch.distributions as td
@@ -13,6 +14,7 @@ import math
 from torch import nn, true_divide
 from .car import WB
 from math import cos, sin, tan, pi
+from ..train_utils import bicycle_model
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -174,7 +176,7 @@ def cluster_and_rank(k: int, data: np.ndarray):
     cluster_ranks = rank_clusters(cluster_cnts.copy(), cluster_ctrs.copy())
     return {'lbls': cluster_lbls, 'ranks': cluster_ranks, 'counts': cluster_cnts}
 
-
+# TODO
 def cluster_traj(k: int, traj: torch.Tensor):
     """
     clusters sampled trajectories to output K modes.
@@ -712,63 +714,19 @@ def project_to_frenet_frame(traj, ref_line):
     sl = torch.stack([s, l], dim=-1)
     return sl
 
-def convert2detail_state(fut_traj, from_init_guess=False, ti = 0.1):
-    # the required fut_traj is n*[x,y]
-    device = fut_traj.device
-    if fut_traj.shape[-1]==2:
-        zero = torch.zeros(fut_traj.shape[0],fut_traj.shape[1],1,2,device=device)
-        straj = torch.cat([zero,fut_traj],dim=2)
-        diff = torch.diff(straj,dim=-2)
-        yaw = torch.atan2(diff[..., 1:2], diff[..., 0:1])
-        # yaw = torch.cat([yaw, yaw[..., -1, :].unsqueeze(-2)], dim=-2)
-        fut_traj = torch.cat([fut_traj, yaw], dim=-1)
-    btsz, samplen, th, dim =  fut_traj.shape
-    fstate = torch.zeros(btsz, samplen,th,4,device=device)
-    u = torch.zeros_like(fut_traj[..., :2],device=device)
-    sdot = (fut_traj[..., 1:, :3]-fut_traj[..., :-1, :3])/ti
-    # dx,dy, dyaw
-    sdot = torch.cat([sdot, sdot[..., -1:, :]], dim=-2)
-    v = torch.norm(sdot[..., :2], dim=-1, keepdim=True)
-    a = (v[..., 1:, :]-v[..., :-1, :])/ti
-    a = torch.cat([a, a[..., -1:, :]], dim=-2)
+def get_u_from_X(X, init_state):
+    L = WB
+    # extend fut_traj
+    _X = torch.cat([init_state[...,:5].unsqueeze(-2),X[...,:5]],dim = -2)
+    v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]
+    a = torch.diff(v,dim=-1)
+    d_theta = torch.diff(_X[...,-3],dim=-1)
+    steering = d_theta*L/v[...,1:]
+    steering = torch.fmod(steering,torch.pi*2)
+    u = torch.stack([a,steering],dim=-1)
+    return u
 
-    fstate[..., :3] = fut_traj[...,:3]
-    fstate[..., 3] = v[..., 0]
-    u[..., 0] = a[..., 0]  # .clamp(min=-MAX_ACC, max=MAX_ACC )
-    u[..., 1] = pi_2_pi(torch.atan2((WB*sdot[..., -1]), v[..., 0]))
-    return fstate[..., :4], u[..., :2]  # x,y,yaw,v, a, steer
-
-
-def bicycle_model(control, current_state):
-    dt = 0.1  # discrete time period [s]
-    x_0 = current_state[..., 0]  # vehicle's x-coordinate [m]
-    y_0 = current_state[..., 1]  # vehicle's y-coordinate [m]
-    theta_0 = current_state[..., 2]  # vehicle's heading [rad]
-    # vehicle's velocity [m/s]
-    v_0 = torch.hypot(current_state[..., 3], current_state[..., 4])
-    L = 3.089  # vehicle's wheelbase [m]
-    a = control[..., 0]  # vehicle's accleration [m/s^2]
-    delta = control[..., 1]  # vehicle's steering [rad]
-
-    # speed
-    v = v_0.unsqueeze(-1) + torch.cumsum(a * dt, dim=-1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    d_theta = v.detach() * delta / L  # use delta to approximate tan(delta)
-    theta = theta_0.unsqueeze(-1) + torch.cumsum(d_theta * dt, dim=-1)
-    theta = torch.fmod(theta, 2*torch.pi)
-
-    # x and y coordniate
-    x = x_0.unsqueeze(-1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(-1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj
-
-# cost functions
+# %% cost functions
 
 
 def acceleration(control):
@@ -806,6 +764,11 @@ def speed(control, current_state):
 
     return speed_error.unsqueeze(-1)
 
+
+def vector_field_diff(traj, vec_field):
+    yaw_v = vec_field.get_yaw_v_by_pos(traj)
+    diff = traj[...,-2:]- yaw_v
+    return diff
 
 def lane_xyyaw(control, ref_line, current_state):
     # global ref_points

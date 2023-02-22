@@ -1,5 +1,6 @@
 import torch
-from torch import device, nn
+from torch import int64, nn
+import matplotlib.pyplot as plt
 from utils.riskmap.utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
 
@@ -189,6 +190,84 @@ class Score(nn.Module):
         scores = self.decode(feature).squeeze(-1)
 
         return scores
+class VectorField():
+    def __init__(self) -> None:
+        self.rear_range = 20
+        self.front_range = 100
+        self.side_range = 50
+        self.steps_s = 150
+        self.steps_l = 100
+        self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
+        self.resolution_l = 2*self.side_range/self.steps_l
+        # make grid
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
+        s,l = torch.meshgrid(s,l,indexing='xy')
+        self.grid_points = torch.stack([s,l],dim=-1).reshape(1, -1, 2)
+        self.yaw_v = None
+
+    def metric2index(self, s, l):
+        idx_s = torch.round((s+self.rear_range)/self.resolution_s).clip(min=0,max=self.steps_s)
+        idx_l = torch.round((l+self.side_range)/self.resolution_l).clip(min=0,max=self.steps_l)
+
+        idx = idx_s+idx_l*self.steps_l
+        return idx.to(dtype=int64)
+    
+    def get_yaw_v(self,yaw_v):
+        self.yaw_v = yaw_v #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
+
+    def get_yaw_v_by_pos(self,samples):
+        btsz, sample, th, dim = samples.shape
+        idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz,-1))
+        yaw_v = torch.gather(self.yaw_v,1,idx.unsqueeze(-1).repeat(1,1,2))
+        return yaw_v.view(btsz, sample, th, 2)
+    
+    def plot(self):
+        yaw_v = self.yaw_v[0].reshape(self.steps_s,self.steps_l,-1)
+        u = torch.cos(yaw_v[...,0])*yaw_v[...,1]
+        v = torch.sin(yaw_v[...,0])*yaw_v[...,1]
+        plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
+                   self.grid_points[0,...,1].cpu().detach(),
+                   u.cpu().detach(),
+                   v.cpu().detach())
+        
+    def get_loss(self, gt):
+        v = torch.hypot(gt[..., 3], gt[..., 4]) # vehicle's velocity [m/s]
+        yaw = torch.fmod(gt[...,2], torch.pi*2)
+        gt_yaw_v = torch.stack([yaw,v],dim=-1)
+        yaw_v = self.get_yaw_v_by_pos(gt)
+        loss = torch.nn.functional.smooth_l1_loss(yaw_v, gt_yaw_v)
+        return loss
+
+class VFMapDecoder(nn.Module):
+    def __init__(self) -> None:
+        super(VFMapDecoder, self).__init__()
+        self.vf = VectorField()
+        self.grid_points = self.vf.grid_points
+        self.map_feat_emb = nn.Linear(256, 64)
+        self.emb = nn.Linear(2, 64)
+        self.cross_attention = nn.MultiheadAttention(64, 2, 0.1, batch_first=True)
+        self.transformer = nn.Sequential(nn.LayerNorm(64), nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
+
+    def forward(self, map_feature, masks):
+        # cross attention of self.grid and map_feature
+        # Q grid points
+        # K,V map_feature
+        btsz = map_feature.shape[0]
+        self.grid_points = self.grid_points.to(map_feature.device)
+        grid = self.grid_points.repeat(btsz,1,1)
+        query = self.emb(grid)
+        map_feature = self.map_feat_emb(map_feature[:,0])
+        x,_ = self.cross_attention(query,
+                                   map_feature,
+                                   map_feature,
+                                   key_padding_mask = masks[:,0]
+                                   )
+        yaw_v = self.transformer(x)
+        self.vf.get_yaw_v(yaw_v)
+        return self.vf
+    
+
 
 # Build predictor
 class Predictor(nn.Module):
@@ -286,6 +365,7 @@ class RiskMapPre(nn.Module):
         self.score = Score()
 
         self.meter2risk: Meter2Risk = CostModules[cfg['planner']['meter2risk']['name']]()
+        self.vf_map_decoder = VFMapDecoder()
 
     def forward(self, ego, neighbors, map_lanes, map_crosswalks):
         # actors
@@ -327,6 +407,7 @@ class RiskMapPre(nn.Module):
         # to be compatible with risk map
         latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
         self.meter2risk.set_latent_feature(latent_feature)
+        self.vf_map = self.vf_map_decoder(map_feature,map_mask)
         
         return plans, predictions, scores, cost_function_weights
 

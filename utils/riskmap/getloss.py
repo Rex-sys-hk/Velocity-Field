@@ -8,7 +8,7 @@ from model.meter2risk import Meter2Risk
 from .utils import has_nan
 from .torch_lattice import torchLatticePlanner
 from utils.riskmap.utils import load_cfg_here
-from .utils import convert2detail_state
+# from .utils import convert2detail_state
 from .map import Map
 from .car import (move,
                   steering_to_yawrate,
@@ -52,10 +52,10 @@ class GetLoss():
         self.loss_CE = lcfg['loss_CE'] if 'loss_CE' in lcfg.keys() else True
         self.loss_var = lcfg['loss_var'] if 'loss_var' in lcfg.keys() else True
         self.loss_reg = lcfg['loss_reg'] if 'loss_reg' in lcfg.keys() else True
-        self.loss_GT_l1 = lcfg['loss_GT_l1'] if 'loss_GT_l1' in lcfg.keys() else True
+        # self.loss_GT_l1 = lcfg['loss_GT_l1'] if 'loss_GT_l1' in lcfg.keys() else True
         self.loss_idv = lcfg['loss_idv'] if 'loss_idv' in lcfg.keys() else True
 
-        self.loss_END = lcfg['loss_END'] if 'loss_END' in lcfg.keys() else True
+        # self.loss_END = lcfg['loss_END'] if 'loss_END' in lcfg.keys() else True
         self.loss_cost_GT = lcfg['loss_cost_GT'] if 'loss_cost_GT' in lcfg.keys() else True
 
         # self.loss_goal:
@@ -88,36 +88,12 @@ class GetLoss():
                 dim: [x,y,yaw,v,yawrate,a,steer]
 
         """
-        # self.tb_iters = tb_iters
-        # initialize ground truth
-        # Btsz, _ ,GTts, GTdim = gt.shape
-        # detailed_gt, u = convert2detail_state(
-        #     gt, ti=self.ti)
         diffXd = torch.norm(
             samples['X'][..., :2] - gt[..., :2], dim=-1)
         sample_risks = sample_risks.mean(dim=-1)
 
         loss = 0
-        # print(traj_result[0].shape)
-        # print(gt.shape)
-        if self.loss_END:
-            loss_END = torch.nn.functional.smooth_l1_loss(traj_result[0][:, :,-1,:3],
-                                     gt[:, 0:1, -1, :3])
-            loss += loss_END
-            if tb_writer:
-                tb_writer.add_scalar('loss/'+'loss_END', loss_END.mean(), tb_iters)
-
-        if self.loss_GT_l1:
-            loss_GT_l1 = torch.nn.functional.smooth_l1_loss(traj_result[0][...,:3], gt[:, 0:1, :, :3])
-            loss += loss_GT_l1
-            if tb_writer:
-                tb_writer.add_scalar('loss/'+'loss_GT_l1', loss_GT_l1.mean(), tb_iters)
-
         if self.loss_cost_GT:
-            # gt_risk, _ = self.get_loss_by_Xu(
-            #     detailed_gt,
-            #     u
-            # )
             # TODO find why gt risk is negtive
             loss_cost_GT = gt_risk.mean()
             loss += loss_cost_GT**2
@@ -135,6 +111,7 @@ class GetLoss():
         # the compliance of L2 diff between Xd and cost diff GT and Xd and GT
         if self.loss_reg:            
             closest_T = torch.min(diffXd.mean(dim=-1),dim=-1,keepdim=True)
+            # remove gather
             loss_diff = (torch.gather(sample_risks,1,closest_T.indices.unsqueeze(dim=-1).repeat(1,1,self.th)) \
                         -gt_risk.mean(dim=-1))**2
             loss += loss_diff.mean()
@@ -149,15 +126,6 @@ class GetLoss():
             if tb_writer:
                 tb_writer.add_scalar('loss/'+'loss_var', loss_var.mean(), tb_iters)
 
-        # velocity difference between GT and NN generated
-        # if self.loss_idv:
-        #     dv = torch.pow(self.meter2risk.get_target_v(
-        #     ).squeeze() - detailed_gt[..., 3], 2).sum()
-        #     loss += dv
-
-        # if self.loss_goal:
-        #     # TODO
-        #     loss += 0
         return loss.mean()  # try max
 
     def get_extend_circles(self, data):
