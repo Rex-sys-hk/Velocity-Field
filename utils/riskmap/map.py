@@ -92,8 +92,6 @@ class Map(nn.Module):
         self.reflane = context['ref_line_info']
         # get prediction
         self.prediction = context['predictions']
-        # # init guess
-        # self.init_guess = context['init_guess']
         # get vf map
         self.vf_map = context['vf_map']
         # get cross walk
@@ -117,22 +115,18 @@ class Map(nn.Module):
     def get_vec_map_meter(self, traj):
         ref_dis = self.dis2ref(traj)
         pre_dis = self.dis2pre(traj)
-        
-        # only consider the nearest neighbor
         pre_dis = pre_dis.min(dim=1).values
-        
-        tl_dis = self.dis2tl(traj)
-        
+        # tl_dis = self.dis2tl(traj) #TODO
         # curb_dis = self.dis2curb(traj)
         # cross_dis = self.dis2cross(traj)
-        speed_dis = self.dis2speed(traj)
+        # speed_dis = self.dis2speed(traj)#TODO
         map_dis = self.dis2map(traj)
         return {'ref_dis':ref_dis,
                 'pre_dis':pre_dis,
-                'tl_dis':tl_dis,
+                # 'tl_dis':tl_dis,
                 # 'curb_dis':curb_dis,
                 # 'cross_dis':cross_dis,
-                'speed_dis': speed_dis,
+                # 'speed_dis': speed_dis,
                 'map_dis': map_dis,
                 }
 

@@ -853,11 +853,31 @@ class SimpleCostCoef(Meter2Risk):
         raw_meters = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
         coeff = self.get_coeff(self.latent_feature['agent_map'][...,0,:].max(dim=1).values).reshape(-1,1,self.th,self.map_elements)
         return coeff*raw_meters
-        
+    
+class CostModel(Meter2Risk):
+    def __init__(self, device: str = 'cuda') -> None:
+        super().__init__(device)
+        self.th = 50
+        self.map_elements = 7
+        self.coeff = nn.Sequential(
+                        nn.Linear(self.th*self.map_elements,128),
+                        nn.GELU(),
+                        nn.Linear(128,128),
+                        nn.GELU(),
+                        nn.Linear(128,self.th*self.map_elements),
+                        ).to(device)
+
+
+    def forward(self, raw_meters):
+        raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
+        b,s,t,d = raw_meters_vec.shape
+        return self.coeff(raw_meters_vec.view(b,s,t*d)).view(b,s,t,d)
+
 CostModules = {
     'deep_cost':DeepCost,
     'deep_map':DeepMapOnly,
     'deep_map_vv':DeepMapOnly_vv,
     'linear_map_vv':LinearMap_vv,
     'simple_coef':SimpleCostCoef,
+    'CostModel':CostModel,
 }

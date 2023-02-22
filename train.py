@@ -6,11 +6,13 @@ import time
 import argparse
 import logging
 import os
+import io
+import PIL.Image
 import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch import nn, optim
-from common_utils import DEBUG, load_checkpoint, save_checkpoint, predictor_selection
+from common_utils import load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
 from utils.riskmap.utils import has_nan, load_cfg_here
 from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
@@ -19,6 +21,8 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
+from torchvision.transforms import ToTensor
+import matplotlib
 import matplotlib.pyplot as plt
 
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
@@ -86,6 +90,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan, u = planner.plan(planner_inputs, batch) # control
             loss += F.smooth_l1_loss(plan[...,:3], ground_truth[:, 0, :, :3]) # ADE
             loss += F.smooth_l1_loss(plan[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            # TODO try no other loss, vf only
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
             vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:])
             loss += plan_loss+vf_loss #+ 1e-3 * plan_cost # planning loss
@@ -102,22 +107,32 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         optimizer.step()
 
         # compute metrics
-        if DEBUG:
+        if (tb_iters+99)%100==0:
             # plt.cla()
+            matplotlib.use('Agg')
+            plt.figure()
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach())
             plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=5)
             # plt.plot(plan_[0,...,0].cpu().detach(),plan_[0,...,1].cpu().detach(),color = 'cyan',lw = 20)
             plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=5)
             vf_map:VectorField = predictor.vf_map
             vf_map.plot()
+            plt.plot(planner_inputs['ref_line_info'][0][...,0].cpu().detach(),planner_inputs['ref_line_info'][0][...,1].cpu().detach())
+            for traj in planner.sample_plan['X'][0]:
+                plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
             # prediction_t = prediction*masks
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')
             #     plt.plot(ground_truth[0,nei+1,...,0].cpu().detach(),ground_truth[0,nei+1,...,1].cpu().detach(),'k')
             plt.axis('equal')
-            plt.pause(0.5)
+            # plt.pause(0.5)
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            image = PIL.Image.open(buf)
+            image = ToTensor()(image).unsqueeze(0)
+            tbwriter.add_images('train/vis',image,tb_iters)
             plt.cla()
-
             # plt.show()
         metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
@@ -310,7 +325,7 @@ def model_training():
     predictor = predictor.to(args.local_rank)
     # set up optimizer
     optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=1.)
 
     # training parameters
     train_epochs = args.train_epochs

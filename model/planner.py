@@ -1,10 +1,6 @@
 import sys
 import os
-from typing import List
-from joblib import PrintTime
-import yaml
 import torch
-from common_utils import DEBUG
 try:
     import theseus as th
 except:
@@ -102,31 +98,15 @@ class RiskMapPlanner(Planner):
         return {'X':X,'u':u}
 
     def plan(self, context, batch):
-        # samping
-        # sample {traj, control} according to state
         self.context = context
         self.sample_plan = self.get_sample(context)
-        if DEBUG:
-            plt.plot(context['ref_line_info'][0][...,0].cpu().detach(),context['ref_line_info'][0][...,1].cpu().detach())
-            for traj in self.sample_plan['X'][0]:
-                plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
-            plt.axis('equal')
-        # checking
-        # calculate dis
         self.meter = self.map.get_meter({'X':self.sample_plan['X'], 'u':self.sample_plan['u']}, context, batch)
-        # directly calculate the realtive position vector and then let meter2risk to estimate risk
-        # map to risk sapce(each item value at each time step)
         self.risks = self.meter2risk(self.meter)
-        # risks_ = torch.zeros_like(self.risks)
-        
-        # # selecting
         self.plan_result = self.selector(self.risks, self.sample_plan)
-        # print(self.sample_plan['X'].shape)
-        # self.plan_result = self.sample_plan['X'][:,-1], self.sample_plan['u'][:,-1]
         return self.plan_result
 
     def selector(self, risks, sample_plan):
-        costs = risks*self.hand_prefer
+        costs = risks*self.hand_prefer[:risks.shape[-1]]
         i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
         X = [sample_plan['X'][ii,i[ii]] for ii in range(i.shape[0])]
         u = [sample_plan['u'][ii,i[ii]] for ii in range(i.shape[0])]
