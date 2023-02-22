@@ -94,6 +94,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:])
             loss += plan_loss+vf_loss #+ 1e-3 * plan_cost # planning loss
         elif planner.name=='base':
+            # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, scores)
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
