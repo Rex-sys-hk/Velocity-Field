@@ -211,7 +211,7 @@ class VectorField():
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
         s,l = torch.meshgrid(s,l,indexing='xy')
         self.grid_points = torch.stack([s,l],dim=-1).reshape(1, -1, 2)
-        self.yaw_v = None
+        self.dx_dy = None
 
     def metric2index(self, s, l):
         idx_s = torch.round((s+self.rear_range)/self.resolution_s).clip(min=0,max=self.steps_s)
@@ -220,31 +220,42 @@ class VectorField():
         idx = idx_s+idx_l*self.steps_l
         return idx.to(dtype=int64)
     
-    def get_yaw_v(self,yaw_v):
-        self.yaw_v = yaw_v #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
+    def get_yaw_v(self,dx_dy):
+        self.dx_dy = dx_dy #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
 
     def get_yaw_v_by_pos(self,samples):
         btsz, sample, th, dim = samples.shape
         idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz,-1))
-        yaw_v = torch.gather(self.yaw_v,1,idx.unsqueeze(-1).repeat(1,1,2))
-        return yaw_v.view(btsz, sample, th, 2)
+        dx_dy = torch.stack([self.dx_dy[i,m] for i,m in enumerate(idx)],dim=0)
+        return dx_dy.view(btsz, sample, th, 2)
     
     def plot(self):
-        yaw_v = self.yaw_v[0].reshape(self.steps_s,self.steps_l,-1)
-        u = torch.cos(yaw_v[...,0])*yaw_v[...,1]
-        v = torch.sin(yaw_v[...,0])*yaw_v[...,1]
+        dx_dy = self.dx_dy[0].reshape(self.steps_s,self.steps_l,-1)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
-                   u.cpu().detach(),
-                   v.cpu().detach())
+                   dx_dy[...,0].cpu().detach(),
+                   dx_dy[...,1].cpu().detach())
         
-    def get_loss(self, gt):
+    def get_loss(self, gt, sample = None):
         # convert to vx,vy
-        v = torch.hypot(gt[..., 3], gt[..., 4]) # vehicle's velocity [m/s]
-        yaw = torch.fmod(gt[...,2], torch.pi*2)
-        gt_yaw_v = torch.stack([yaw,v],dim=-1)
-        yaw_v = self.get_yaw_v_by_pos(gt)
-        loss = torch.nn.functional.smooth_l1_loss(yaw_v, gt_yaw_v)
+        dx_dy = self.get_yaw_v_by_pos(gt)
+        loss = torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,-2:])
+        loss += 1e-3*torch.nn.functional.smooth_l1_loss(self.dx_dy,
+                                                        torch.zeros_like(self.dx_dy,device=self.dx_dy.device))
+        if sample != None:
+            diff_sample_gt = 0
+            dis_diff = gt[...,:,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
+                                            sample[...,:-1,:2]],
+                                            dim=-2)
+            d_dis_diff = dis_diff/0.5 #Time interval
+            diff_sample_gt+=d_dis_diff
+            gt_dxy = gt[...,-2:]
+            sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
+                                      torch.sin(sample[...,2])*sample[...,3]],
+                                      dim=-1)
+            diff_sample_gt += gt_dxy - sample_dxy
+            dx_dy = self.get_yaw_v_by_pos(sample[...,:2])
+            loss += torch.nn.functional.smooth_l1_loss(dx_dy, diff_sample_gt)
         return loss
 
 class VFMapDecoder(nn.Module):

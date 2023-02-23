@@ -90,7 +90,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             loss += F.smooth_l1_loss(plan[...,:3], ground_truth[:, 0, :, :3]) # ADE
             loss += F.smooth_l1_loss(plan[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
-            vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:])
+            vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:], 
+                                                planner.gt_sample['X'])
             loss += plan_loss+vf_loss
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
@@ -125,12 +126,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 for traj in planner.sample_plan['X'][0]:
                     plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
             plt.axis('equal')
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            image = PIL.Image.open(buf)
-            image = ToTensor()(image).unsqueeze(0)
-            tbwriter.add_images('train/vis',image,tb_iters)
+            plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png')
             plt.close()
         metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
@@ -167,7 +163,6 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
     return np.mean(epoch_loss), epoch_metrics
 
 def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, distributed=False):
-    epoch_loss = []
     epoch_metrics = []
     current = 0
     size = len(data_loader.dataset)
@@ -209,6 +204,8 @@ def model_training():
     # Logging
     log_path = f"./training_log/{args.name}/"
     os.makedirs(log_path, exist_ok=True)
+    os.makedirs(os.path.join(log_path,'images'), exist_ok=True)
+    os.makedirs(os.path.join(log_path,'ckpt'), exist_ok=True)
     initLogging(log_file=log_path+'train.log')
     shutil.copyfile(os.getenv('DIPP_CONFIG'), f'{log_path}/config.yaml')
 
@@ -322,10 +319,8 @@ def model_training():
 
         # save model at the end of epoch
         if args.local_rank==0 or not distributed:
-            ckpt_file_name = f'training_log/{args.name}/model_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
+            ckpt_file_name = f'training_log/{args.name}/ckpt/model_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
             save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
-            # torch.save(predictor.state_dict(), ckpt_file_name)
-            # logging.info(f"Model saved in {ckpt_file_name}")
         if distributed:
             dist.barrier()
     if distributed:
