@@ -232,6 +232,7 @@ class VectorField():
                    v.cpu().detach())
         
     def get_loss(self, gt):
+        # convert to vx,vy
         v = torch.hypot(gt[..., 3], gt[..., 4]) # vehicle's velocity [m/s]
         yaw = torch.fmod(gt[...,2], torch.pi*2)
         gt_yaw_v = torch.stack([yaw,v],dim=-1)

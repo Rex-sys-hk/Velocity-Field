@@ -315,7 +315,7 @@ def model_training():
 
     predictor = predictor.to(args.local_rank)
     # set up optimizer
-    optimizer = optim.Adam(predictor.parameters(), lr=args.learning_rate)
+    optimizer = optim.AdamW(predictor.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=1.)
 
     # training parameters

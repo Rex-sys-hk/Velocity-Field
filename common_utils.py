@@ -31,7 +31,7 @@ def save_checkpoint(epoch, save_name, cfg, model):
 def load_checkpoint(model_file, map_location):
     """ Load a model from a file. """
     print("Loading model from {}".format(model_file))
-    model_dict = torch.load(model_file)
+    model_dict = torch.load(model_file,map_location='cpu')
     ## save loaded model params
     print('>>>> Model config is:')
     for k,v in model_dict['model_cfg'].items():
