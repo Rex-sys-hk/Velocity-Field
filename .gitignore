@@ -10,4 +10,6 @@ start_train.sh
 utils/riskmap/mpp/lib/build/
 start_train_test.ps1
 start_train_test.sh
+start_cl_test.sh
+start_ol_test.sh
 config.yaml

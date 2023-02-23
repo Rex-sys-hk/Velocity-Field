@@ -74,37 +74,6 @@ def CTRV_model(agents):
 
     return prediction
 
-def bicycle_model(control, current_state):
-    dt = 0.1 # discrete time period [s]
-    max_delta = 0.6 # vehicle's steering limits [rad]
-    max_a = 5 # vehicle's accleration limits [m/s^2]
-
-    x_0 = current_state[:, 0] # vehicle's x-coordinate [m]
-    y_0 = current_state[:, 1] # vehicle's y-coordinate [m]
-    theta_0 = current_state[:, 2] # vehicle's heading [rad]
-    v_0 = torch.hypot(current_state[:, 3], current_state[:, 4]) # vehicle's velocity [m/s]
-    L = 3.089 # vehicle's wheelbase [m]
-    a = control[:, :, 0].clamp(-max_a, max_a) # vehicle's accleration [m/s^2]
-    delta = control[:, :, 1].clamp(-max_delta, max_delta) # vehicle's steering [rad]
-
-    # speed
-    v = v_0.unsqueeze(1) + torch.cumsum(a * dt, dim=1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    d_theta = v * torch.tan(delta) / L
-    theta = theta_0.unsqueeze(1) + torch.cumsum(d_theta * dt, dim=-1)
-    theta = torch.fmod(theta, 2*torch.pi)
-    
-    # x and y coordniate
-    x = x_0.unsqueeze(1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-    
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj
-
 def physical_model(control, current_state, dt=0.1):
     dt = 0.1 # discrete time period [s]
     max_d_theta = 0.5 # vehicle's change of angle limits [rad/s]

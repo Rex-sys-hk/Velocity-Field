@@ -12,7 +12,7 @@ import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch import nn, optim
-from common_utils import load_checkpoint, save_checkpoint, predictor_selection
+from common_utils import inference, load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
 from utils.riskmap.utils import has_nan, load_cfg_here
 from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
@@ -79,7 +79,6 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         elif planner.name=='risk':
             u, prediction = select_future(plans, predictions, scores)
-            plan = bicycle_model(u, ego[:, -1])
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -92,7 +91,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             loss += F.smooth_l1_loss(plan[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
             vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:])
-            loss += plan_loss+vf_loss #+ 1e-3 * plan_cost # planning loss
+            loss += plan_loss+vf_loss
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, scores)
@@ -177,60 +176,12 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, d
     for it, batch in enumerate(data_loader):
         tb_iters+=1
         # prepare data
-        ego = batch[0].to(args.local_rank)
-        neighbors = batch[1].to(args.local_rank)
-        map_lanes = batch[2].to(args.local_rank)
-        map_crosswalks = batch[3].to(args.local_rank)
-        ref_line_info = batch[4].to(args.local_rank)
+        plan, prediction = inference(batch,predictor, planner, args, use_planning)
         ground_truth = batch[5].to(args.local_rank)
-        current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
-
-        # predict
-        with torch.no_grad():
-            plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-            plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
-
-        if not use_planning:
-            plan, prediction = select_future(plan_trajs, predictions, scores)
-        elif planner.name=='dipp':
-            plan, prediction = select_future(plans, predictions, scores)
-
-            planner_inputs = {
-                "control_variables": plan.view(-1, 100), # generate initial control sequence
-                "predictions": prediction, # generate predictions for surrounding vehicles 
-                "ref_line_info": ref_line_info,
-                "current_state": current_state
-            }
-
-            for i in range(cost_function_weights.shape[1]):
-                planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
-
-            with torch.no_grad():
-                final_values, info = planner.layer.forward(planner_inputs)
-
-                plan = final_values["control_variables"].view(-1, 50, 2)
-                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
-        elif planner.name=='risk':
-            u, prediction = select_future(plans, predictions, scores)
-            plan = bicycle_model(u, ego[:, -1])
-            planner_inputs = {
-                "predictions": prediction, # prediction for surrounding vehicles 
-                "ref_line_info": ref_line_info,
-                "current_state": current_state,
-                "vf_map": predictor.vf_map,
-                'init_guess_u': u,
-            }
-            with torch.no_grad():
-                plan, u = planner.plan(planner_inputs, batch) # control
-        elif planner.name=='base':
-            plan, prediction = select_future(plans, predictions, scores)
-            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
-
         # compute metrics
         metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
-
         # show progress
         if args.local_rank==0 or not distributed:
             current += batch[0].shape[0]
@@ -288,11 +239,7 @@ def model_training():
         # set up planner
     else:
         map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
-        # try:
         predictor, start_epoch = load_checkpoint(args.ckpt, map_location)
-            # predictor.load_state_dict(torch.load(args.ckpt, map_location=args.device))
-        # except:
-            # predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.ckpt, map_location=map_location).items()})
         logging.info(f'ckpt successful loaded from {args.ckpt}')
 
 
@@ -303,11 +250,7 @@ def model_training():
             trajectory_len, feature_len = 50, 9
             planner = MotionPlanner(trajectory_len, feature_len, device= args.local_rank)
         if cfg['planner']['name'] == 'risk':
-            # to deal with DDP different saving format
-            if distributed:
-                planner = RiskMapPlanner(predictor.module.meter2risk, device= args.local_rank)
-            else:
-                planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)
+            planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.local_rank)
     else:

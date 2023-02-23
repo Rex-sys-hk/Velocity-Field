@@ -2,15 +2,18 @@ import torch
 import argparse
 import glob
 import os
+import sys
 import logging
-import time
 import matplotlib.pyplot as plt
 import pandas as pd
 import tensorflow as tf
+from utils.riskmap.utils import load_cfg_here
 from utils.test_utils import *
+from common_utils import *
 from model.planner import MotionPlanner
-from model.predictor import Predictor
 from waymo_open_dataset.protos import scenario_pb2
+os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
 def open_loop_test():
     # logging
@@ -35,18 +38,22 @@ def open_loop_test():
     prediction_ADE, prediction_FDE = [], []
 
     # load model
-    predictor = Predictor(50).to(args.device)
-    predictor = torch.nn.DataParallel(predictor)
-    try:
-        predictor.load_state_dict(torch.load(args.model_path, map_location=args.device))
-    except:
-        predictor.load_state_dict({k.join(['module.','']):v for k,v in torch.load(args.model_path, map_location=args.device).items()})
+    predictor, start_epoch = load_checkpoint(args.model_path, map_location='cpu')
+    predictor.to(args.device)
+    logging.info(f'ckpt successful loaded from {args.model_path}')
     predictor.eval()
 
     # set up planner
     if args.use_planning:
-        trajectory_len, feature_len = 50, 9
-        planner = MotionPlanner(trajectory_len, feature_len, device=args.device, test=True)
+        if cfg['planner']['name'] == 'dipp':
+            trajectory_len, feature_len = 50, 9
+            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
+        if cfg['planner']['name'] == 'risk':
+            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
+        if cfg['planner']['name'] == 'base':
+            planner = BasePlanner(device= args.device)
+    else:
+        planner = None
 
     # iterate test files
     for file in files:
@@ -72,34 +79,16 @@ def open_loop_test():
                 input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
                 ego = torch.from_numpy(input_data[0]).to(args.device)
                 neighbors = torch.from_numpy(input_data[1]).to(args.device)
-                lanes = torch.from_numpy(input_data[2]).to(args.device)
-                crosswalks = torch.from_numpy(input_data[3]).to(args.device)
+                # lanes = torch.from_numpy(input_data[2]).to(args.device)
+                # crosswalks = torch.from_numpy(input_data[3]).to(args.device)
                 ref_line = torch.from_numpy(input_data[4]).to(args.device)
                 neighbor_ids, norm_gt_data, gt_data = input_data[5], input_data[6], input_data[7]
                 current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-
-                # predict
-                with torch.no_grad():
-                    plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, lanes, crosswalks)
-                    plan, prediction = select_future(plans, predictions, scores)
-
-                # plan
-                if args.use_planning:
-                    planner_inputs = {
-                        "control_variables": plan.view(-1, 100),
-                        "predictions": prediction,
-                        "ref_line_info": ref_line,
-                        "current_state": current_state
-                    }
-
-                    for i in range(feature_len):
-                        planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(0)
-
-                    with torch.no_grad():
-                        final_values, info = planner.layer.forward(planner_inputs, optimizer_kwargs={'track_best_solution': True})
-                        plan = info.best_solution['control_variables'].view(-1, 50, 2).to(args.device)
                 
-                plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+                batch = []
+                for i in range(5):
+                    batch.append(torch.from_numpy(input_data[i]))
+                plan, prediction = inference(batch, predictor, planner, args, args.use_planning)
                 plan = plan.cpu().numpy()[0]
 
                 # compute metrics
@@ -219,6 +208,7 @@ if __name__ == "__main__":
     # Arguments
     parser = argparse.ArgumentParser(description='Training')
     parser.add_argument('--name', type=str, help='log name (default: "Test1")', default="Test1")
+    parser.add_argument('--config', type=str, help='path to the config file', default= None)
     parser.add_argument('--test_set', type=str, help='path to testing datasets')
     parser.add_argument('--model_path', type=str, help='path to saved model')
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
@@ -226,6 +216,8 @@ if __name__ == "__main__":
     parser.add_argument('--save', action="store_true", help='if save the rendered images (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     args = parser.parse_args()
-
+    cfg_file = args.config if args.config else 'config.yaml'
+    os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)
+    cfg = load_cfg_here()
     # Run
     open_loop_test()

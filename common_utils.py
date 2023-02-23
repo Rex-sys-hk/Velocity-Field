@@ -9,6 +9,7 @@ Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查�
 import torch
 from model.predictor import Predictor, RiskMapPre
 from model.planner import BasePlanner, MotionPlanner, RiskMapPlanner
+from utils.train_utils import bicycle_model, select_future
 predictor_selection = {'base': Predictor,
                        'dipp': Predictor,
                        'risk': RiskMapPre}
@@ -41,3 +42,52 @@ def load_checkpoint(model_file, map_location):
     epoch = model_dict['epoch']
     print('load succeed')
     return predictor, epoch
+
+def inference(batch, predictor, planner, args, use_planning):
+    ego = batch[0].to(args.device)
+    neighbors = batch[1].to(args.device)
+    map_lanes = batch[2].to(args.device)
+    map_crosswalks = batch[3].to(args.device)
+    ref_line_info = batch[4].to(args.device)
+    current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+    with torch.no_grad():
+        plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
+
+    if not use_planning:
+        plan, prediction = select_future(plan_trajs, predictions, scores)
+    elif planner.name=='dipp':
+        plan, prediction = select_future(plans, predictions, scores)
+
+        planner_inputs = {
+            "control_variables": plan.view(-1, 100), # generate initial control sequence
+            "predictions": prediction, # generate predictions for surrounding vehicles 
+            "ref_line_info": ref_line_info,
+            "current_state": current_state
+        }
+
+        for i in range(cost_function_weights.shape[1]):
+            planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+
+        with torch.no_grad():
+            final_values, info = planner.layer.forward(planner_inputs)
+
+            plan = final_values["control_variables"].view(-1, 50, 2)
+            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+    elif planner.name=='risk':
+        u, prediction = select_future(plans, predictions, scores)
+        plan = bicycle_model(u, ego[:, -1])
+        planner_inputs = {
+            "predictions": prediction, # prediction for surrounding vehicles 
+            "ref_line_info": ref_line_info,
+            "current_state": current_state,
+            "vf_map": predictor.vf_map,
+            'init_guess_u': u,
+        }
+        with torch.no_grad():
+            plan, u = planner.plan(planner_inputs, batch) # control
+    elif planner.name=='base':
+        plan, prediction = select_future(plans, predictions, scores)
+        plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+
+    return plan, prediction
