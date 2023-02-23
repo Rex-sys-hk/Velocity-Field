@@ -12,7 +12,6 @@ import os
 import sys
 import math
 from torch import nn, true_divide
-from model.predictor import VectorField
 from .car import WB
 from math import cos, sin, tan, pi
 from ..train_utils import bicycle_model
@@ -765,14 +764,6 @@ def speed(control, current_state):
 
     return speed_error.unsqueeze(-1)
 
-
-def vector_field_diff(traj, vec_field:VectorField):
-    dx_dy = vec_field.get_yaw_v_by_pos(traj)
-    traj_xy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
-                           torch.sin(traj[...,2])*traj[...,3]],
-                           dim=-1)
-    diff = traj_xy - dx_dy
-    return diff
 
 def lane_xyyaw(control, ref_line, current_state):
     # global ref_points

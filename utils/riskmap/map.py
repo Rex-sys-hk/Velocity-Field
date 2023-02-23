@@ -20,7 +20,6 @@ from .utils import (has_nan,
                     steering,
                     steering_change,
                     speed,
-                    vector_field_diff,
                     lane_xyyaw,
                     # lane_theta,
                     red_light_violation,
@@ -77,11 +76,11 @@ class Map(nn.Module):
         self.debug = debug
         self.vf_map = None
 
-    def get_meter(self, sample_plan, context, batch):
-        self.get_new_data(context, batch)
+    def get_meter(self, sample_plan, context):
+        self.get_new_data(context)
         return self.get_vec_map_meter(sample_plan)
 
-    def get_new_data(self, context, batch):
+    def get_new_data(self, context):
         # open_space = data['image'].flip(0)
         # self.sdf = self.getsdf(open_space)
         # agents_num = data['agents_num']
@@ -93,7 +92,8 @@ class Map(nn.Module):
         # get prediction
         self.prediction = context['predictions']
         # get vf map
-        self.vf_map = context['vf_map']
+        if not self.vf_map:
+            self.vf_map = context['vf_map']
         # get cross walk
         # self.cross_walk = batch[3].to(device)
 
@@ -146,7 +146,7 @@ class Map(nn.Module):
         return speed(traj['u'], self.ego_current_state)
     
     def dis2map(self,traj):
-        return vector_field_diff(traj['X'],self.vf_map)
+        return self.vf_map.vector_field_diff(traj['X'])
 
         
     # def dis2cross(self,traj):

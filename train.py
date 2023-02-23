@@ -86,7 +86,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "vf_map": predictor.vf_map,
                 'init_guess_u': u,
             }
-            plan, u = planner.plan(planner_inputs, batch) # control
+            plan, u = planner.plan(planner_inputs) # control
             loss += F.smooth_l1_loss(plan[...,:3], ground_truth[:, 0, :, :3]) # ADE
             loss += F.smooth_l1_loss(plan[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
@@ -122,7 +122,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             ## special output
             if use_planning and planner.name=='risk':
                 vf_map:VectorField = predictor.vf_map
-                vf_map.plot()
+                vf_map.plot(planner.sample_plan['X'][0:1])
                 for traj in planner.sample_plan['X'][0]:
                     plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
             plt.axis('equal')
@@ -173,7 +173,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, d
     for it, batch in enumerate(data_loader):
         tb_iters+=1
         # prepare data
-        plan, prediction = inference(batch,predictor, planner, args, use_planning)
+        plan, prediction = inference(batch, predictor, planner, args, use_planning)
         ground_truth = batch[5].to(args.local_rank)
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
         # compute metrics

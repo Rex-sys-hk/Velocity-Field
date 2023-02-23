@@ -85,7 +85,7 @@ def inference(batch, predictor, planner, args, use_planning):
             'init_guess_u': u,
         }
         with torch.no_grad():
-            plan, u = planner.plan(planner_inputs, batch) # control
+            plan, u = planner.plan(planner_inputs) # control
     elif planner.name=='base':
         plan, prediction = select_future(plans, predictions, scores)
         plan = bicycle_model(plan, ego[:, -1])[:, :, :3]

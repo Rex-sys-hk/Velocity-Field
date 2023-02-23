@@ -1,5 +1,5 @@
 import torch
-from torch import int64, nn
+from torch import int64, long, nn
 import matplotlib.pyplot as plt
 from utils.riskmap.utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
@@ -199,37 +199,41 @@ class Score(nn.Module):
         return scores
 class VectorField():
     def __init__(self) -> None:
-        self.rear_range = 20
-        self.front_range = 100
-        self.side_range = 50
-        self.steps_s = 150
-        self.steps_l = 100
+        self.rear_range = 20.
+        self.front_range = 100.
+        self.side_range = 40.
+        self.steps_s = int(120)
+        self.steps_l = int(80)
         self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
         self.resolution_l = 2*self.side_range/self.steps_l
         # make grid
-        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
-        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
-        s,l = torch.meshgrid(s,l,indexing='xy')
-        self.grid_points = torch.stack([s,l],dim=-1).reshape(1, -1, 2)
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s, device='cuda:0')
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l, device='cuda:0')
+        x,y = torch.meshgrid(s,l,indexing='xy')
+        self.grid_points = torch.stack([x,y],dim=-1).reshape(1, -1, 2)
         self.dx_dy = None
 
     def metric2index(self, s, l):
-        idx_s = torch.round((s+self.rear_range)/self.resolution_s).clip(min=0,max=self.steps_s)
-        idx_l = torch.round((l+self.side_range)/self.resolution_l).clip(min=0,max=self.steps_l)
-
-        idx = idx_s+idx_l*self.steps_l
-        return idx.to(dtype=int64)
+        idx_s = torch.floor((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)
+        idx_l = torch.floor((l+self.side_range)/self.resolution_l).clip(0,self.steps_l-1)
+        idx = idx_s+idx_l*self.steps_s
+        return idx.to(dtype=long).clip(0,self.steps_s*self.steps_l-1)
     
     def get_yaw_v(self,dx_dy):
         self.dx_dy = dx_dy #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
 
     def get_yaw_v_by_pos(self,samples):
         btsz, sample, th, dim = samples.shape
-        idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz,-1))
+        idx = self.metric2index(samples[...,0].reshape(btsz,-1), samples[...,1].reshape(btsz, -1))
         dx_dy = torch.stack([self.dx_dy[i,m] for i,m in enumerate(idx)],dim=0)
         return dx_dy.view(btsz, sample, th, 2)
     
-    def plot(self):
+    def plot(self, samples = None):
+        if samples != None:
+            btsz, sample, th, dim = samples.shape
+            idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1))
+            xy = torch.stack([self.grid_points[0,m.cpu()] for i,m in enumerate(idx)],dim=0)
+            plt.scatter(xy[...,0].cpu().detach(),xy[...,1].cpu().detach())
         dx_dy = self.dx_dy[0].reshape(self.steps_s,self.steps_l,-1)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
@@ -257,6 +261,14 @@ class VectorField():
             dx_dy = self.get_yaw_v_by_pos(sample[...,:2])
             loss += torch.nn.functional.smooth_l1_loss(dx_dy, diff_sample_gt)
         return loss
+    
+    def vector_field_diff(self, traj):
+        dx_dy = self.get_yaw_v_by_pos(traj)
+        traj_xy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
+                            torch.sin(traj[...,2])*traj[...,3]],
+                            dim=-1)
+        diff = traj_xy - dx_dy
+        return diff
 
 class VFMapDecoder(nn.Module):
     def __init__(self) -> None:

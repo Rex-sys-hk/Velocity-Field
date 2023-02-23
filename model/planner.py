@@ -1,3 +1,4 @@
+from random import sample
 import sys
 import os
 import torch
@@ -87,15 +88,15 @@ class RiskMapPlanner(Planner):
     def get_sample(self, context, gt_u = None, cov = 0.2):
         btsz = context['init_guess_u'].shape[0]
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        u = (torch.randn([btsz,400,50,2],device = init_guess_u.device)*cov+1)*init_guess_u.unsqueeze(1)
+        u = (torch.randn([btsz,40,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u.unsqueeze(1)
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         return {'X':X,'u':u}
 
-    def plan(self, context, batch):
+    def plan(self, context):
         self.context = context
         self.sample_plan = self.get_sample(context)
-        self.meter = self.map.get_meter(self.sample_plan, context, batch)
+        self.meter = self.map.get_meter(self.sample_plan, context)
         self.risks = self.meter2risk(self.meter)
         self.plan_result = self.selector(self.risks, self.sample_plan)
         return self.plan_result
@@ -103,8 +104,12 @@ class RiskMapPlanner(Planner):
     def selector(self, risks, sample_plan):
         costs = risks*self.hand_prefer[:risks.shape[-1]]
         i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
-        X = [sample_plan['X'][ii,i[ii]] for ii in range(i.shape[0])]
-        u = [sample_plan['u'][ii,i[ii]] for ii in range(i.shape[0])]
+        X,u = [],[]
+        sampleX = sample_plan['X']
+        sampleu = sample_plan['u']
+        for ii,m in enumerate(i.cpu()):
+            X.append(sampleX[ii,m])
+            u.append(sampleu[ii,m])
         X = torch.stack(X,dim=0)
         u = torch.stack(u,dim=0)
         return X,u#torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
