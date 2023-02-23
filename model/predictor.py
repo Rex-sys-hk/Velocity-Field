@@ -84,13 +84,15 @@ class CrossTransformer(nn.Module):
 class MultiModalTransformer(nn.Module):
     def __init__(self, modes=3, output_dim=256):
         super(MultiModalTransformer, self).__init__()
-        self.modes = modes
-        self.attention = nn.ModuleList([nn.MultiheadAttention(256, 4, 0.1, batch_first=True) for _ in range(modes)])
+        # self.modes = modes
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+        self.attention = nn.ModuleList([nn.MultiheadAttention(256, 4, 0.1, batch_first=True) for _ in range(self.mode_num)])
         self.ffn = nn.Sequential(nn.LayerNorm(256), nn.Linear(256, 1024), nn.ReLU(), nn.Dropout(0.1), nn.Linear(1024, output_dim), nn.LayerNorm(output_dim))
 
     def forward(self, query, key, value, mask=None):
         attention_output = []
-        for i in range(self.modes):
+        for i in range(self.mode_num):
             attention_output.append(self.attention[i](query, key, value, key_padding_mask=mask)[0])
         attention_output = torch.stack(attention_output, dim=1)
         output = self.ffn(attention_output)
@@ -122,7 +124,6 @@ class Agent2Map(nn.Module):
         crosswalks_actor = [self.crosswalk_attention(query, crosswalks[:, i], crosswalks[:, i]) for i in range(crosswalks.shape[1])]
         map_actor = torch.cat(lanes_actor+crosswalks_actor, dim=1)
         output = self.map_attention(query, map_actor, map_actor, mask).squeeze(2)
-
         return map_actor, output 
 
 # Decoders
@@ -130,6 +131,8 @@ class AgentDecoder(nn.Module):
     def __init__(self, future_steps):
         super(AgentDecoder, self).__init__()
         self._future_steps = future_steps 
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         self.decode = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU(), nn.Linear(256, future_steps*3))
 
     def transform(self, prediction, current_state):
@@ -147,10 +150,10 @@ class AgentDecoder(nn.Module):
         return traj
        
     def forward(self, agent_map, agent_agent, current_state):
-        feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, 3, 1, 1)], dim=-1)
-        decoded = self.decode(feature).view(-1, 3, 10, self._future_steps, 3)
-        trajs = torch.stack([self.transform(decoded[:, i, j], current_state[:, j]) for i in range(3) for j in range(10)], dim=1)
-        trajs = torch.reshape(trajs, (-1, 3, 10, self._future_steps, 3))
+        feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1, 1)], dim=-1)
+        decoded = self.decode(feature).view(-1, self.mode_num, 10, self._future_steps, 3)
+        trajs = torch.stack([self.transform(decoded[:, i, j], current_state[:, j]) for i in range(self.mode_num) for j in range(10)], dim=1)
+        trajs = torch.reshape(trajs, (-1, self.mode_num, 10, self._future_steps, 3))
 
         return trajs
 
@@ -158,14 +161,16 @@ class AVDecoder(nn.Module):
     def __init__(self, future_steps=50, feature_len=9):
         super(AVDecoder, self).__init__()
         self._future_steps = future_steps
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         self.control = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU(), nn.Linear(256, future_steps*2))
         self.cost = nn.Sequential(nn.Linear(1, 128), nn.ReLU(), nn.Linear(128, feature_len), nn.Softmax(dim=-1))
         self.register_buffer('scale', torch.tensor([1, 1, 1, 1, 1, 10, 100]))
         self.register_buffer('constraint', torch.tensor([[10, 10]]))
 
     def forward(self, agent_map, agent_agent):
-        feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, 3, 1)], dim=-1)
-        actions = self.control(feature).view(-1, 3, self._future_steps, 2)
+        feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1)], dim=-1)
+        actions = self.control(feature).view(-1, self.mode_num , self._future_steps, 2)
         dummy = torch.ones(1, 1).to(self.cost[0].weight.device)
         cost_function_weights = torch.cat([self.cost(dummy)[:, :7] * self.scale, self.constraint], dim=-1)
 
@@ -176,6 +181,8 @@ class Score(nn.Module):
         super(Score, self).__init__()
         self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU())
         self.decode = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 128), nn.ELU(), nn.Linear(128, 1))
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
 
     def forward(self, map_feature, agent_agent, agent_map):
         # pooling
@@ -186,7 +193,7 @@ class Score(nn.Module):
 
         feature = torch.cat([map_feature, agent_agent], dim=-1)
         feature = self.reduce(feature.detach())
-        feature = torch.cat([feature.unsqueeze(1).repeat(1, 3, 1), agent_map.detach()], dim=-1)
+        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
         scores = self.decode(feature).squeeze(-1)
 
         return scores
@@ -272,7 +279,7 @@ class VFMapDecoder(nn.Module):
 
 # Build predictor
 class Predictor(nn.Module):
-    def __init__(self, name:str = 'dipp', future_steps = 50):
+    def __init__(self, name:str = 'dipp', future_steps = 50, mode_num = 3):
         super(Predictor, self).__init__()
         self.name = 'dipp'
         if self.name != name:
@@ -339,7 +346,7 @@ class Predictor(nn.Module):
 
     
 class RiskMapPre(nn.Module):
-    def __init__(self, name:str = 'risk', future_steps = 50):
+    def __init__(self, name:str = 'risk', future_steps = 50, mode_num = 3):
         super(RiskMapPre, self).__init__()
         self.name = 'risk'
         if self.name != name:

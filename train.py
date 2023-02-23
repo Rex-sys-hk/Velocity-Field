@@ -51,13 +51,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # predict
         optimizer.zero_grad()
         plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
-        loss = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
+        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(cfg['model_cfg']['mode_num'])], dim=1)
+        loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
         # plan
         if not use_planning:
-            plan, prediction = select_future(plan_trajs, predictions, scores)
+            plan, prediction = select_future(plan_trajs, predictions, best_mode)
         elif planner.name=='dipp':
-            plan, prediction = select_future(plans, predictions, scores)
+            plan, prediction = select_future(plans, predictions, best_mode)
 
             planner_inputs = {
                 "control_variables": plan.view(-1, 100), # initial control sequence
@@ -78,7 +78,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         elif planner.name=='risk':
-            u, prediction = select_future(plans, predictions, scores)
+            u, prediction = select_future(plans, predictions, best_mode)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -94,7 +94,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             loss += plan_loss+vf_loss
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
-            plan, prediction = select_future(plan_trajs, predictions, scores)
+            plan, prediction = select_future(plan_trajs, predictions, best_mode)
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
             loss += plan_loss
@@ -111,6 +111,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach())
             plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=5)
             plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=5)
+            for mod in plan_trajs[0].cpu().detach():
+                plt.plot(mod[...,0], mod[...,1])
             # prediction_t = prediction*masks
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')
@@ -234,9 +236,7 @@ def model_training():
     for key in cfg['model_cfg']:
         logging.info(f"--{key}: {cfg['model_cfg'][key]}")
     if not args.ckpt:
-        # set up predictor
         predictor = predictor_selection[cfg['model_cfg']['name']](**cfg['model_cfg']) #Predictor(50)
-        # set up planner
     else:
         map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
         predictor, start_epoch = load_checkpoint(args.ckpt, map_location)

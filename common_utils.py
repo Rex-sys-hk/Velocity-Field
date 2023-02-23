@@ -52,7 +52,7 @@ def inference(batch, predictor, planner, args, use_planning):
     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
     with torch.no_grad():
         plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(3)], dim=1)
+        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(scores.shape[1])], dim=1)
 
     if not use_planning:
         plan, prediction = select_future(plan_trajs, predictions, scores)
