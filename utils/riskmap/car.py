@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 
-WB = 1.0  # rear to front wheel
+WB = 3.0  # rear to front wheel
 W = 2.0  # width of car
 R = W/2.0
 LF = 3.3  # distance from rear to vehicle front end
