@@ -7,6 +7,7 @@ import logging
 import matplotlib.pyplot as plt
 import pandas as pd
 import tensorflow as tf
+from statistic import static_result
 from utils.riskmap.utils import load_cfg_here
 from utils.test_utils import *
 from common_utils import *
@@ -56,11 +57,13 @@ def open_loop_test():
         planner = None
 
     # iterate test files
-    for file in files:
+    for i,file in enumerate(files[args.test_pkg_sid:args.test_pkg_num]):
         scenarios = tf.data.TFRecordDataset(file)
-
+        logging.info(f'\n >>>[{i}/{len(files)}]:')
         # iterate scenarios in the test file
-        for scenario in scenarios:
+        length = [1 for s in scenarios]
+        for ii, scenario in enumerate(scenarios):
+            logging.info(f'\n >>>scenario {ii}/{len(length)}')
             parsed_data = scenario_pb2.Scenario()
             parsed_data.ParseFromString(scenario.numpy())
 
@@ -197,12 +200,15 @@ def open_loop_test():
                     plt.clf()
 
     # save results
-    df = pd.DataFrame(data={'collision':collisions, 'red_light':red_light, 'off_route':off_route, 
+    data = {'collision':collisions, 'red_light':red_light, 'off_route':off_route, 
                             'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
                             'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
                             'Prediction_ADE':prediction_ADE, 'Prediction_FDE':prediction_FDE,
-                            'Human_L2_1s':similarity_1s, 'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s})
+                            'Human_L2_1s':similarity_1s, 'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s}
+    df = pd.DataFrame(data=data)
     df.to_csv(f'./testing_log/{args.name}/testing_log.csv')
+    logging.info(f'file results saved in ./testing_log/{args.name}/testing_log.csv')
+    static_result(df, args.name)
 
 if __name__ == "__main__":
     # Arguments
@@ -210,6 +216,8 @@ if __name__ == "__main__":
     parser.add_argument('--name', type=str, help='log name (default: "Test1")', default="Test1")
     parser.add_argument('--config', type=str, help='path to the config file', default= None)
     parser.add_argument('--test_set', type=str, help='path to testing datasets')
+    parser.add_argument('--test_pkg_sid', type=int, help='start package counts', default=0)
+    parser.add_argument('--test_pkg_num', type=int, help='test package counts', default=3)
     parser.add_argument('--model_path', type=str, help='path to saved model')
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--render', action="store_true", help='if render the scenario (default: False)', default=False)

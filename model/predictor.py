@@ -207,8 +207,8 @@ class VectorField():
         self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
         self.resolution_l = 2*self.side_range/self.steps_l
         # make grid
-        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s, device='cuda:0')
-        l = torch.linspace(-self.side_range,self.side_range,self.steps_l, device='cuda:0')
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
         x,y = torch.meshgrid(s,l,indexing='xy')
         self.grid_points = torch.stack([x,y],dim=-1).reshape(1, -1, 2)
         self.dx_dy = None
@@ -243,7 +243,7 @@ class VectorField():
     def get_loss(self, gt, sample = None):
         # convert to vx,vy
         dx_dy = self.get_yaw_v_by_pos(gt)
-        loss = torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,-2:])
+        loss = torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
         loss += 1e-3*torch.nn.functional.smooth_l1_loss(self.dx_dy,
                                                         torch.zeros_like(self.dx_dy,device=self.dx_dy.device))
         if sample != None:
@@ -251,13 +251,12 @@ class VectorField():
             dis_diff = gt[...,:,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
                                             sample[...,:-1,:2]],
                                             dim=-2)
-            d_dis_diff = dis_diff/0.5 #Time interval
+            d_dis_diff = dis_diff/0.1 #Time interval
             diff_sample_gt+=d_dis_diff
-            gt_dxy = gt[...,-2:]
             sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
                                       torch.sin(sample[...,2])*sample[...,3]],
                                       dim=-1)
-            diff_sample_gt += gt_dxy - sample_dxy
+            diff_sample_gt += gt[...,3:5] - sample_dxy
             dx_dy = self.get_yaw_v_by_pos(sample[...,:2])
             loss += torch.nn.functional.smooth_l1_loss(dx_dy, diff_sample_gt)
         return loss

@@ -109,6 +109,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             ## general output
             matplotlib.use('Agg')
             plt.figure()
+            plt.title(f'{args.name}')
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach())
             plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=5)
             plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=5)
@@ -126,7 +127,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 for traj in planner.sample_plan['X'][0]:
                     plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
             plt.axis('equal')
-            plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png')
+            plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
             plt.close()
         metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
