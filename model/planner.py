@@ -1,3 +1,4 @@
+import logging
 from random import sample
 import sys
 import os
@@ -77,6 +78,7 @@ class RiskMapPlanner(Planner):
     def __init__(self, meter2risk: Meter2Risk, device, test=False) -> None:
         super(RiskMapPlanner, self).__init__(device, test)
         self.name = 'risk'
+        cfg = load_cfg_here()
         # self.lattice_planner = torchLatticePlanner(device, test=test)
         self.map = Map(device, test=False)
         self.hand_prefer = torch.softmax(
@@ -84,6 +86,13 @@ class RiskMapPlanner(Planner):
         )  # handcratfed preference
         self.meter2risk = meter2risk
         self.loss_calculator = GetLoss(meter2risk,self.map,device)
+        self.cov_base = 0.2
+        self.cov_inc = 1+1.2e-4
+        try:
+            self.cov_base = cfg['planner']['cov_base']
+            self.cov_inc = 1+cfg['planner']['cov_inc']
+        except:
+            logging.warning('cov_base amd conv_inc not define')
 
     def get_sample(self, context, gt_u = None, cov = 0.2):
         btsz = context['init_guess_u'].shape[0]
@@ -120,7 +129,7 @@ class RiskMapPlanner(Planner):
         """
         # detailed_gt, u_gt = convert2detail_state(gt)
         u = get_u_from_X(gt,self.map.ego_current_state)
-        self.gt_sample = self.get_sample(self.context,u.squeeze(1))
+        self.gt_sample = self.get_sample(self.context,u.squeeze(1), cov=self.cov_base*(self.cov_inc**tb_iter))
         raw_meter = self.map.get_vec_map_meter(self.gt_sample)
         gt_risk = self.meter2risk(raw_meter)
         

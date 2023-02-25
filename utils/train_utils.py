@@ -1,3 +1,4 @@
+from distutils.log import error
 import torch
 import logging
 import glob
@@ -122,6 +123,8 @@ def project_to_cartesian_frame(traj, ref_line):
     return xy
 
 def bicycle_model(control, current_state):
+    if len(control.shape)!=len(current_state.shape)+1:
+        logging.error('tensor dim inconsist')
     dt = 0.1 # discrete time period [s]
     max_delta = 0.6 # vehicle's steering limits [rad]
     max_a = 5 # vehicle's accleration limits [m/s^2]
@@ -149,10 +152,6 @@ def bicycle_model(control, current_state):
     traj = torch.stack([x, y, theta, v], dim=-1)
 
     return traj
-
-def inverse_bicycle_model(traj, current_state):
-    control = 0 #TODO
-    return control
 
 def physical_model(control, current_state, dt=0.1):
     # point with mass

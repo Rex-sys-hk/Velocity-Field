@@ -6,8 +6,6 @@ import time
 import argparse
 import logging
 import os
-import io
-import PIL.Image
 import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -21,7 +19,6 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler as DSample
-from torchvision.transforms import ToTensor
 import matplotlib
 import matplotlib.pyplot as plt
 
@@ -78,7 +75,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         elif planner.name=='risk':
+            planner:RiskMapPlanner = planner
+            vf_map:VectorField = predictor.vf_map
             u, prediction = select_future(plans, predictions, best_mode)
+            # guess loss
+            init_guess = bicycle_model(u,ego[:, -1])
+            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
+            loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -86,13 +89,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "vf_map": predictor.vf_map,
                 'init_guess_u': u,
             }
+            # plan loss
             plan, u = planner.plan(planner_inputs) # control
-            loss += F.smooth_l1_loss(plan[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += F.smooth_l1_loss(plan[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
-            plan_loss = planner.get_loss(ground_truth[...,0:1,:,:],tb_iters,tbwriter)
-            vf_loss = predictor.vf_map.get_loss(ground_truth[...,0:1,:,:], 
-                                                planner.gt_sample['X'])
-            loss += plan_loss+vf_loss
+            loss += planner.get_loss(ground_truth[...,0:1,:,:],
+                                     tb_iters,
+                                     tbwriter)
+            loss += vf_map.get_loss(ground_truth[...,0:1,:,:], 
+                                    planner.gt_sample['X'])
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
@@ -105,30 +108,37 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)
         optimizer.step()
         # compute metrics
-        if tb_iters==int(iter_base)+1 or (tb_iters)%100==0:
-            ## general output
+        if tb_iters%100==0:
             matplotlib.use('Agg')
-            plt.figure()
             plt.title(f'{args.name}')
-            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach())
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=5)
-            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=5)
+            ## special output
+            if use_planning and planner.name=='risk':
+                vf_map:VectorField = predictor.vf_map
+
+                vf_map.plot(planner.sample_plan['X'][0:1])
+                for traj in planner.sample_plan['X'][0].cpu().detach():
+                    plt.plot(traj[...,0],traj[...,1],'orange',lw=0.5)
+
+                vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
+                for traj in planner.gt_sample['X'][0].cpu().detach():
+                    plt.plot(traj[...,0],traj[...,1],'g',lw=0.5)
+            ## general output
+            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), lw=1, label='reflane')
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=1,label='plan result')
+            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=1,label='GT')
             for mod in plan_trajs[0].cpu().detach():
-                plt.plot(mod[...,0], mod[...,1])
+                plt.plot(mod[...,0], mod[...,1],'cyan',lw=0.5)
             # prediction_t = prediction*masks
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')
             #     plt.plot(ground_truth[0,nei+1,...,0].cpu().detach(),ground_truth[0,nei+1,...,1].cpu().detach(),'k')
-
-            ## special output
-            if use_planning and planner.name=='risk':
-                vf_map:VectorField = predictor.vf_map
-                vf_map.plot(planner.sample_plan['X'][0:1])
-                for traj in planner.sample_plan['X'][0]:
-                    plt.plot(traj[...,0].cpu().detach(),traj[...,1].cpu().detach())
+            plt.xlim(-30,110)
+            plt.ylim(-50,50)
+            plt.legend()
             plt.axis('equal')
             plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
             plt.close()
+            plt.figure()
         metrics = motion_metrics(plan, prediction, ground_truth, masks)
         epoch_metrics.append(metrics)
         epoch_loss.append(loss.item())

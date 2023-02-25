@@ -869,7 +869,7 @@ class CostModel(Meter2Risk):
 
 
     def forward(self, raw_meters):
-        raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
+        raw_meters_vec = torch.cat([raw_meters[key].detach() for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
         return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
 

@@ -1,3 +1,5 @@
+from cProfile import label
+from sklearn.preprocessing import scale
 import torch
 from torch import int64, long, nn
 import matplotlib.pyplot as plt
@@ -120,6 +122,7 @@ class Agent2Map(nn.Module):
 
     def forward(self, actor, lanes, crosswalks, mask):
         query = actor.unsqueeze(1)
+        # TODO use map_actor
         lanes_actor = [self.lane_attention(query, lanes[:, i], lanes[:, i]) for i in range(lanes.shape[1])]
         crosswalks_actor = [self.crosswalk_attention(query, crosswalks[:, i], crosswalks[:, i]) for i in range(crosswalks.shape[1])]
         map_actor = torch.cat(lanes_actor+crosswalks_actor, dim=1)
@@ -233,22 +236,45 @@ class VectorField():
             btsz, sample, th, dim = samples.shape
             idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1))
             xy = torch.stack([self.grid_points[0,m.cpu()] for i,m in enumerate(idx)],dim=0)
-            plt.scatter(xy[...,0].cpu().detach(),xy[...,1].cpu().detach())
+            plt.scatter(xy[...,0].cpu().detach(),
+                        xy[...,1].cpu().detach(),
+                        label='Visited Grid')
         dx_dy = self.dx_dy[0].reshape(self.steps_s,self.steps_l,-1)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
                    dx_dy[...,0].cpu().detach(),
-                   dx_dy[...,1].cpu().detach())
+                   dx_dy[...,1].cpu().detach(),
+                   label='Vector Field')
+        
+    def plot_gt(self, gt, samples):
+        diff_sample_gt = 0
+        dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(samples[...,0:1,:2],device=samples.device), 
+                                        samples[...,:-1,:2]],
+                                        dim=-2)
+        d_dis_diff = dis_diff/0.1 #Time interval
+        diff_sample_gt+=d_dis_diff
+        sample_dxy = torch.stack([torch.cos(samples[...,2])*samples[...,3], 
+                                  torch.sin(samples[...,2])*samples[...,3]],
+                                  dim=-1)
+        diff_sample_gt += gt[...,3:5] - sample_dxy
+        # plt.scatter(samples[0,...,0].cpu().detach(),
+        #     samples[0,...,1].cpu().detach())
+        plt.quiver(samples[0,...,0].cpu().detach(),
+            samples[0,...,1].cpu().detach(),
+            diff_sample_gt[0,...,0].cpu().detach(),
+            diff_sample_gt[0,...,1].cpu().detach(), 
+            color = 'green',
+            label='GT Vector')
         
     def get_loss(self, gt, sample = None):
         # convert to vx,vy
         dx_dy = self.get_yaw_v_by_pos(gt)
-        loss = torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
-        loss += 1e-3*torch.nn.functional.smooth_l1_loss(self.dx_dy,
+        loss = 1e-2*torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
+        loss += 1e-2*torch.nn.functional.smooth_l1_loss(self.dx_dy,
                                                         torch.zeros_like(self.dx_dy,device=self.dx_dy.device))
         if sample != None:
             diff_sample_gt = 0
-            dis_diff = gt[...,:,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
+            dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
                                             sample[...,:-1,:2]],
                                             dim=-2)
             d_dis_diff = dis_diff/0.1 #Time interval

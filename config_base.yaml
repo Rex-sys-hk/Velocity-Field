@@ -19,6 +19,8 @@ planner:
   sdf_interpolating_factor: 1
   u_dim: 2
   default_v: 20 # m/s
+  cov_base: 0.2
+  cov_inc: 5.e-4
 
   train_sampler_config: 'utils/riskmap/mpp/frenet_sampler.train.json'
   test_sampler_config: 'utils/riskmap/mpp/frenet_sampler.train.json'
@@ -48,8 +50,8 @@ planner:
   loss:
     loss_CE: True
     loss_var: False
-    loss_reg: False
-    loss_GT_l1: False
-    loss_idv: False
-    loss_END: False
-    loss_cost_GT: False
+    # loss_reg: False
+    # loss_GT_l1: False
+    # loss_idv: False
+    # loss_END: False
+    # loss_cost_GT: False

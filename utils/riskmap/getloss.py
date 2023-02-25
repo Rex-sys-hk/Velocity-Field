@@ -101,6 +101,7 @@ class GetLoss():
                 tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iters)
 
         if self.loss_CE:
+            # TODO not changing
             prob = torch.softmax(-sample_risks[..., 10:], dim=1)
             dis_prob = torch.softmax(-diffXd[..., 10:], dim=1)
             cls_loss = self.crossE(prob, dis_prob)

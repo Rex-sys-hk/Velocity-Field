@@ -716,13 +716,14 @@ def project_to_frenet_frame(traj, ref_line):
 
 def get_u_from_X(X, init_state):
     L = WB
+    dt = 0.1
     # extend fut_traj
     _X = torch.cat([init_state[...,:5].unsqueeze(-2),X[...,:5]],dim = -2)
     v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]
-    a = torch.diff(v,dim=-1)
-    d_theta = torch.diff(_X[...,-3],dim=-1)
-    steering = d_theta*L/v[...,1:]
-    steering = torch.fmod(steering,torch.pi*2)
+    a = torch.diff(v,dim=-1)/dt
+    d_theta = torch.diff(_X[...,2],dim=-1)/dt
+    steering = L*torch.div(d_theta,v[...,1:])
+    steering = pi_2_pi(steering)
     u = torch.stack([a,steering],dim=-1)
     return u
 
