@@ -111,6 +111,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         if tb_iters%100==0:
             matplotlib.use('Agg')
             plt.title(f'{args.name}')
+            plt.autoscale(False)
             ## special output
             if use_planning and planner.name=='risk':
                 vf_map:VectorField = predictor.vf_map
@@ -132,8 +133,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')
             #     plt.plot(ground_truth[0,nei+1,...,0].cpu().detach(),ground_truth[0,nei+1,...,1].cpu().detach(),'k')
-            plt.xlim(-30,110)
-            plt.ylim(-50,50)
+            plt.xlim(-20,100)
+            plt.ylim(-40,40)
             plt.legend()
             plt.axis('equal')
             plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
