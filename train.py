@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 from torch import nn, optim
 from common_utils import inference, load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
-from utils.riskmap.utils import has_nan, load_cfg_here
+from utils.riskmap.utils import get_u_from_X, has_nan, load_cfg_here
 from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
 from model.predictor import Predictor, VectorField
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
@@ -78,6 +78,10 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.vf_map
             u, prediction = select_future(plans, predictions, best_mode)
+            u = torch.cat([
+                            u[...,0:1].clamp(-5,5),
+                            pi_2_pi(u[...,1:2])
+                            ],dim=-1)
             # guess loss
             init_guess = bicycle_model(u,ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
@@ -118,7 +122,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
 
                 vf_map.plot(planner.sample_plan['X'][0:1])
                 for traj in planner.sample_plan['X'][0].cpu().detach():
-                    plt.plot(traj[...,0],traj[...,1],'orange',lw=0.5)
+                    plt.plot(traj[...,0],traj[...,1],'r',lw=0.5)
 
                 vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
                 for traj in planner.gt_sample['X'][0].cpu().detach():

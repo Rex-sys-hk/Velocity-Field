@@ -269,9 +269,8 @@ class VectorField():
     def get_loss(self, gt, sample = None):
         # convert to vx,vy
         dx_dy = self.get_yaw_v_by_pos(gt)
-        loss = 1e-2*torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
-        loss += 1e-2*torch.nn.functional.smooth_l1_loss(self.dx_dy,
-                                                        torch.zeros_like(self.dx_dy,device=self.dx_dy.device))
+        loss = 1e-3*torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
+        loss += 1e-3*(self.dx_dy**2).mean()
         if sample != None:
             diff_sample_gt = 0
             dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 

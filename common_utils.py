@@ -9,6 +9,7 @@ Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查�
 import torch
 from model.predictor import Predictor, RiskMapPre
 from model.planner import BasePlanner, MotionPlanner, RiskMapPlanner
+from utils.riskmap.car import pi_2_pi
 from utils.train_utils import bicycle_model, select_future
 predictor_selection = {'base': Predictor,
                        'dipp': Predictor,
@@ -76,6 +77,10 @@ def inference(batch, predictor, planner, args, use_planning):
             plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
     elif planner.name=='risk':
         u, prediction = select_future(plans, predictions, scores)
+        u = torch.cat([
+                u[...,0:1].clamp(-5,5),
+                pi_2_pi(u[...,1:2])
+                ],dim=-1)
         plan = bicycle_model(u, ego[:, -1])
         planner_inputs = {
             "predictions": prediction, # prediction for surrounding vehicles 

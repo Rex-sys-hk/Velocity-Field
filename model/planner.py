@@ -85,26 +85,31 @@ class RiskMapPlanner(Planner):
             torch.tensor(self.cfg['risk_preference'], device=device), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
-        self.loss_calculator = GetLoss(meter2risk,self.map,device)
+        # self.loss_calculator = GetLoss(meter2risk,self.map,device)
+        self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
+
         self.cov_base = 0.2
         self.cov_inc = 1+1.2e-4
+        self.gt_sample_num = cfg['planner']['gt_sample_num']
+        self.plan_sample_num = cfg['planner']['plan_sample_num']
+
         try:
             self.cov_base = cfg['planner']['cov_base']
             self.cov_inc = 1+cfg['planner']['cov_inc']
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = 0.2):
+    def get_sample(self, context, gt_u = None, cov = 0.2, sample_num=100):
         btsz = context['init_guess_u'].shape[0]
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        u = (torch.randn([btsz,40,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u.unsqueeze(1)
+        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u.unsqueeze(1)
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         return {'X':X,'u':u}
 
     def plan(self, context):
         self.context = context
-        self.sample_plan = self.get_sample(context)
+        self.sample_plan = self.get_sample(context,sample_num=self.plan_sample_num)
         self.meter = self.map.get_meter(self.sample_plan, context)
         self.risks = self.meter2risk(self.meter)
         self.plan_result = self.selector(self.risks, self.sample_plan)
@@ -129,19 +134,37 @@ class RiskMapPlanner(Planner):
         """
         # detailed_gt, u_gt = convert2detail_state(gt)
         u = get_u_from_X(gt,self.map.ego_current_state)
-        self.gt_sample = self.get_sample(self.context,u.squeeze(1), cov=self.cov_base*(self.cov_inc**tb_iter))
+        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+                                         cov=self.cov_base*(self.cov_inc**tb_iter), 
+                                         sample_num=self.plan_sample_num)
         raw_meter = self.map.get_vec_map_meter(self.gt_sample)
         gt_risk = self.meter2risk(raw_meter)
         
-        return self.loss_calculator.get_loss(self.gt_sample,
-                                             self.risks,
-                                             self.plan_result,
-                                             gt,
-                                             gt,
-                                             gt_risk,
-                                             tb_iters=tb_iter,
-                                             tb_writer=tb_writer
-                                             )
+        diffXd = torch.norm(
+            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+        gt_risk = gt_risk.mean(dim=-1)
+
+        loss = 0
+        # if self.loss_cost_GT:
+        # TODO find why gt risk is negtive
+        loss_cost_GT = gt_risk.mean()
+        loss += loss_cost_GT**2
+        if tb_writer:
+            tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iter)
+
+        # if self.loss_CE:
+        # TODO not changing
+        prob = torch.softmax(-gt_risk[..., 10:], dim=1)
+        dis_prob = torch.softmax(-diffXd[..., 10:], dim=1)
+        cls_loss = self.crossE(prob, dis_prob)
+        loss += cls_loss
+        if tb_writer:
+            tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)
+
+        return loss
+        # return loss.mean()
+        
+
 
 
 # cost functions

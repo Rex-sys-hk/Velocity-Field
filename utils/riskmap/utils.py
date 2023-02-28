@@ -722,7 +722,8 @@ def get_u_from_X(X, init_state):
     v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]
     a = torch.diff(v,dim=-1)/dt
     d_theta = torch.diff(_X[...,2],dim=-1)/dt
-    steering = L*torch.div(d_theta,v[...,1:])
+    steering = torch.atan2(L*d_theta,v[...,1:])
+    steering = torch.nan_to_num(steering,nan=0.)
     steering = pi_2_pi(steering)
     u = torch.stack([a,steering],dim=-1)
     return u
