@@ -102,9 +102,12 @@ class RiskMapPlanner(Planner):
     def get_sample(self, context, gt_u = None, cov = 0.2, sample_num=100):
         btsz = context['init_guess_u'].shape[0]
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u.unsqueeze(1)
+        init_guess_u=init_guess_u.unsqueeze(1)
+        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
+        u = torch.cat([init_guess_u,u],dim=1)
+        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
         return {'X':X,'u':u}
 
     def plan(self, context):
@@ -139,23 +142,16 @@ class RiskMapPlanner(Planner):
                                          sample_num=self.plan_sample_num)
         raw_meter = self.map.get_vec_map_meter(self.gt_sample)
         gt_risk = self.meter2risk(raw_meter)
-        
+
         diffXd = torch.norm(
             self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
         gt_risk = gt_risk.mean(dim=-1)
 
         loss = 0
-        # if self.loss_cost_GT:
-        # TODO find why gt risk is negtive
-        loss_cost_GT = gt_risk.mean()
-        loss += loss_cost_GT**2
-        if tb_writer:
-            tb_writer.add_scalar('loss/'+'loss_cost_GT', loss_cost_GT.mean(), tb_iter)
+        loss += 1e-4*(gt_risk**2).mean()
 
-        # if self.loss_CE:
-        # TODO not changing
-        prob = torch.softmax(-gt_risk[..., 10:], dim=1)
-        dis_prob = torch.softmax(-diffXd[..., 10:], dim=1)
+        prob = torch.softmax(-torch.mean(gt_risk[..., 10:],dim=-1), dim=1)
+        dis_prob = torch.softmax(-torch.mean(diffXd[..., 10:],dim=-1), dim=1)
         cls_loss = self.crossE(prob, dis_prob)
         loss += cls_loss
         if tb_writer:
