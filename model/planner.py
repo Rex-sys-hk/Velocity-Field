@@ -1,20 +1,15 @@
 import logging
-from random import sample
 import sys
 import os
 import torch
 try:
     import theseus as th
 except:
-    # print('[WARNING] theseus is not implemented')
-    pass
-from utils.riskmap.getloss import GetLoss
+    print('[WARNING] theseus is not implemented')
 from utils.train_utils import bicycle_model, project_to_frenet_frame
-from utils.riskmap.torch_lattice import torchLatticePlanner
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
 from utils.riskmap.utils import get_u_from_X, load_cfg_here
-import matplotlib.pyplot as plt
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
 class Planner:
@@ -73,12 +68,89 @@ class MotionPlanner(Planner):
         self.layer = th.TheseusLayer(self.optimizer, vectorize=False)
         self.layer.to(device=device)
 
+class EularSamplingPlanner(Planner):
+    def __init__(self, meter2risk: Meter2Risk, device='cuda:0', test=False):
+        super(EularSamplingPlanner, self).__init__(device, test)
+        self.name = 'esp'
+        self.device = device
+        self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
+        self.cost_function_weights = meter2risk
+        self.cov_base = 0.2
+        self.cov_inc = 1+1.2e-4
+        self.gt_sample_num = self.cfg['gt_sample_num']
+        self.plan_sample_num = self.cfg['plan_sample_num']
+        try:
+            self.cov_base = self.cfg['cov_base']
+            self.cov_inc = 1+self.cfg['cov_inc']
+        except:
+            logging.warning('cov_base amd conv_inc not define')
+
+    def get_sample(self, context, gt_u = None, cov = 0.2, sample_num=100):
+        btsz = context['init_guess_u'].shape[0]
+        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
+        init_guess_u=init_guess_u.unsqueeze(1)
+        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
+        cur_state = context['current_state'][:,0:1]
+        X = bicycle_model(u,cur_state)
+        u = torch.cat([init_guess_u,u],dim=1)
+        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
+        return {'X':X,'u':u}
+    
+    def selector(self, costs, sample_plan):
+        i = torch.argmin(costs,dim=1)
+        X,u = [],[]
+        sampleX = sample_plan['X']
+        sampleu = sample_plan['u']
+        for ii,m in enumerate(i.cpu()):
+            X.append(sampleX[ii,m])
+            u.append(sampleu[ii,m])
+        X = torch.stack(X,dim=0)
+        u = torch.stack(u,dim=0)
+        return X,u
+
+    def plan(self, context):
+        self.context = context
+        self.sample_plan = self.get_sample(context)
+        self.cost = cost_function_sample(self.sample_plan['u'], 
+                                          context['current_state'], 
+                                          context['predictions'], 
+                                          context['ref_line_info'], 
+                                          self.cost_function_weights())
+        self.plan_result = self.selector(self.cost.mean(dim=-1), self.sample_plan)
+        return self.plan_result
+
+    def get_loss(self, gt, tb_iter=0, tb_writer=None):
+        """
+        must be called after forward
+        """
+        u = get_u_from_X(gt,self.context['current_state'][:,0:1])
+        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+                                         cov=self.cov_base*(self.cov_inc**tb_iter), 
+                                         sample_num=self.plan_sample_num)
+        cost = cost_function_sample(self.gt_sample['u'], 
+                                    self.context['current_state'], 
+                                    self.context['predictions'], 
+                                    self.context['ref_line_info'], 
+                                    self.cost_function_weights())
+
+        diffXd = torch.norm(
+            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+        loss = 0
+        loss += 1e-4*(cost**2).mean()
+
+        prob = torch.softmax(-torch.mean(cost[..., 10:],dim=-1), dim=1)
+        dis_prob = torch.softmax(-torch.mean(diffXd[..., 10:],dim=-1), dim=1)
+        cls_loss = self.crossE(prob, dis_prob)
+        loss += cls_loss
+        if tb_writer:
+            tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)
+
+        return loss
 
 class RiskMapPlanner(Planner):
     def __init__(self, meter2risk: Meter2Risk, device, test=False) -> None:
         super(RiskMapPlanner, self).__init__(device, test)
         self.name = 'risk'
-        cfg = load_cfg_here()
         # self.lattice_planner = torchLatticePlanner(device, test=test)
         self.map = Map(device, test=False)
         self.hand_prefer = torch.softmax(
@@ -90,12 +162,12 @@ class RiskMapPlanner(Planner):
 
         self.cov_base = 0.2
         self.cov_inc = 1+1.2e-4
-        self.gt_sample_num = cfg['planner']['gt_sample_num']
-        self.plan_sample_num = cfg['planner']['plan_sample_num']
+        self.gt_sample_num = self.cfg['gt_sample_num']
+        self.plan_sample_num = self.cfg['plan_sample_num']
 
         try:
-            self.cov_base = cfg['planner']['cov_base']
-            self.cov_inc = 1+cfg['planner']['cov_inc']
+            self.cov_base = self.cfg['cov_base']
+            self.cov_inc = 1+self.cfg['cov_inc']
         except:
             logging.warning('cov_base amd conv_inc not define')
 
@@ -139,7 +211,7 @@ class RiskMapPlanner(Planner):
         u = get_u_from_X(gt,self.map.ego_current_state)
         self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
                                          cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.plan_sample_num)
+                                         sample_num=self.gt_sample_num)
         raw_meter = self.map.get_vec_map_meter(self.gt_sample)
         gt_risk = self.meter2risk(raw_meter)
 
@@ -345,3 +417,166 @@ def  cost_function(objective, control_variables, current_state, predictions, ref
     objective.add(safety_cost)
 
     return objective
+
+def _acceleration(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    acc = control[..., 0]
+
+    return acc
+
+
+def _jerk(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    acc = control[..., 0]
+    zeros = torch.zeros_like(acc[...,-1:],device=acc.device)
+    jerk = torch.diff(acc, dim=-1, append=zeros) / 0.1
+
+    return jerk
+
+
+def _steering(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    steering = control[..., 1]
+
+    return steering
+
+
+def _steering_change(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    steering = control[..., 1]
+    zeros = torch.zeros_like(steering[...,-1:],device=steering.device)
+    steering_change = torch.diff(steering, dim=-1, append=zeros) / 0.1
+
+    return steering_change
+
+
+def _speed(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    current_state = aux_vars[1].tensor[:, 0:1]
+    velocity = torch.hypot(current_state[..., 3], current_state[..., 4])
+    dt = 0.1
+
+    acc = control[..., 0]
+    speed = velocity.unsqueeze(-2) + torch.cumsum(acc * dt, dim=-1)
+    speed = torch.clamp(speed, min=0)
+    speed_limit = torch.max(
+        aux_vars[0].tensor[..., -1], dim=-1, keepdim=True)[0]
+    speed_error = speed - speed_limit.unsqueeze(-1)
+
+    return speed_error
+
+
+def _lane_xy(optim_vars, aux_vars):
+    global ref_points
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    ref_line = aux_vars[0].tensor
+    current_state = aux_vars[1].tensor[:, 0:1]
+    
+    traj = bicycle_model(control, current_state)
+    btsz,mod,th,dim = traj.shape
+    distance_to_ref = torch.cdist(traj[..., :2].reshape(btsz,-1,2), ref_line[:, :, :2])
+    distance_to_ref = distance_to_ref.reshape(btsz,mod,th,-1)
+    k = torch.argmin(distance_to_ref, dim=-1).view(btsz,
+                                                   mod, th, 1).expand(-1, -1, -1, 3)
+    ref_points = torch.gather(ref_line.unsqueeze(-3).repeat(1,mod,1,1), 2, k)
+    lane_error = torch.cat([traj[..., 0:1]-ref_points[..., 0:1],
+                           traj[..., 1:2]-ref_points[..., 1:2], 
+                           ],  dim=-1)
+    lane_error = torch.norm(lane_error,dim=-1)
+    return lane_error
+
+def _lane_theta(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    current_state = aux_vars[1].tensor[:, 0:1]
+
+    traj = bicycle_model(control, current_state)
+    theta = traj[..., 2]
+    lane_error = theta[...] - ref_points[..., 2]
+
+    return lane_error
+
+
+def _red_light_violation(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    current_state = aux_vars[1].tensor[:, 0:1]
+    ref_line = aux_vars[0].tensor
+    red_light = ref_line[..., -1]
+    dt = 0.1
+
+    velocity = torch.hypot(current_state[..., 3], current_state[..., 4])
+    acc = control[..., 0]
+    speed = velocity.unsqueeze(-1) + torch.cumsum(acc * dt, dim=-1)
+    speed = torch.clamp(speed, min=0)
+    s = torch.cumsum(speed * dt, dim=-1)
+    stop_point = torch.max(red_light[:, 200:] == 0, dim=-1)[1] * 0.1
+    stop_distance = stop_point.view(-1, 1, 1) - 3
+    red_light_error = (s - stop_distance) * \
+        (s > stop_distance) * (stop_point.unsqueeze(-1).unsqueeze(-1) != 0)
+    return red_light_error
+
+
+def _safety(optim_vars, aux_vars):
+    control = optim_vars[0].tensor#.view(-1, 50, 2)
+    neighbors = aux_vars[0].tensor.permute(0, 2, 1, 3)
+    current_state = aux_vars[1].tensor
+    ref_line = aux_vars[2].tensor
+    actor_mask = torch.ne(current_state, 0)[:, 1:, -1]
+    ego_current_state = current_state[:, 0:1]
+    ego = bicycle_model(control, ego_current_state)
+    ego_len, ego_width = ego_current_state[..., -3], ego_current_state[..., -2]
+    neighbors_current_state = current_state[:, 1:]
+    neighbors_len, neighbors_width = neighbors_current_state[..., -3], neighbors_current_state[..., -2]
+
+    l_eps = (ego_width + neighbors_width)/2 + 0.5
+    frenet_neighbors = torch.stack([
+        project_to_frenet_frame(neighbors[:, :, i].detach(), ref_line) 
+        for i in range(neighbors.shape[2])], dim=2)
+    frenet_ego = torch.stack([
+        project_to_frenet_frame(ego[:,i].detach(), ref_line) 
+        for i in range(ego.shape[1])], dim=2)
+
+    safe_error = []
+    for t in range(ego.shape[2]):#[0, 2, 5, 9, 14, 19, 24, 29, 39, 49]:  # key frames
+        # find objects of interest
+        l_distance = torch.abs(frenet_ego[:, t, :, 1:] - frenet_neighbors[:, t, :, 1].unsqueeze(-2))
+        s_distance = frenet_neighbors[:, t, :, 0].unsqueeze(-2) - frenet_ego[:, t, :, 0:1]
+        interactive = torch.logical_and(
+            s_distance > 0, l_distance < l_eps.unsqueeze(-2)) * actor_mask.unsqueeze(-2)
+
+        # find closest object
+        distances = torch.norm(ego[:, :, t:t+1, :2] - neighbors[:, t:t+1, :, :2], dim=-1)
+        distances = torch.masked_fill(
+            distances, torch.logical_not(interactive), 100)
+        distance, index = torch.min(distances, dim=-1)
+        s_eps = (ego_len + torch.gather(neighbors_len.unsqueeze(-2).repeat(1,index.shape[-1],1), 
+                                        2, 
+                                        index.unsqueeze(-1))
+                 [..., 0])/2 + 5
+
+        # calculate cost
+        error = (s_eps - distance) * (distance < s_eps)
+        safe_error.append(error)
+
+    safe_error = torch.stack(safe_error, dim=-1)
+    return safe_error
+
+class TmpContainer():
+    def __init__(self, tensor=None) -> None:
+        self.tensor = tensor
+
+def cost_function_sample(control_variables, current_state, predictions, ref_line, cost_function_weights):
+    control_variables = TmpContainer(control_variables)
+    current_state = TmpContainer(current_state)
+    predictions = TmpContainer(predictions)
+    ref_line = TmpContainer(ref_line)
+    cost = 0
+    cost += cost_function_weights[0]*_speed([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[1]*_acceleration([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[2]*_jerk([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[3]*_steering([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[4]*_steering_change([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[5]*_lane_xy([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[6]*_lane_theta([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[7]*_red_light_violation([control_variables],[ref_line, current_state])
+    cost += cost_function_weights[8]*_safety([control_variables],[predictions, current_state, ref_line])
+    return cost

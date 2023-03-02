@@ -1,0 +1,22 @@
+# console
+model_cfg:
+  name: 'dipp'
+  future_steps: 50
+  mode_num: 8
+
+planner: 
+  name: 'dipp'
+  time_horizon: 50
+  time_interval: 0.1
+  feature_count: 9
+  trajectory_len: 50 
+  feature_len: 9
+  cost_items: 3
+  num_functions: 1 #+-log, +-exp,1/x,sigmoid,x^2,x
+  sdf_index_ratio: [1.,1.]
+  ego_center: [30,35]
+  lagrange_dim: 4
+  reflane_interpolating_factor: 2 #SET ZERO TO DISABLE
+  sdf_interpolating_factor: 1
+  u_dim: 2
+  default_v: 20 # m/s

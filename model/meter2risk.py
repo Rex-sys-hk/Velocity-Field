@@ -13,7 +13,7 @@ class Meter2Risk(nn.Module):
         self.device = device
         cfg = load_cfg_here()['planner']['meter2risk']
         self.TVC=cfg['TVC']
-        self.V_dim=['V_dim']
+        self.V_dim=cfg['V_dim']
         self.th=cfg['th']
         self.idv= cfg['idv']
         self.latent_feature = None
@@ -872,6 +872,14 @@ class CostModel(Meter2Risk):
         raw_meters_vec = torch.cat([raw_meters[key].detach() for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
         return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
+    
+class Coefficient(Meter2Risk):
+    def __init__(self, device: str = 'cuda') -> None:
+        super().__init__(device)
+        self.th = 50
+        self.coeff = nn.Parameter(torch.randn(self.V_dim,device=self.device))
+    def forward(self):
+        return self.coeff
 
 CostModules = {
     'deep_cost':DeepCost,
@@ -880,4 +888,5 @@ CostModules = {
     'linear_map_vv':LinearMap_vv,
     'simple_coef':SimpleCostCoef,
     'CostModel':CostModel,
+    'Coefficient':Coefficient,
 }

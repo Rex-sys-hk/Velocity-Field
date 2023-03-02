@@ -8,17 +8,21 @@ Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查�
 '''
 import torch
 from model.predictor import Predictor, RiskMapPre
-from model.planner import BasePlanner, MotionPlanner, RiskMapPlanner
+from model.planner import BasePlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
 from utils.riskmap.car import pi_2_pi
 from utils.train_utils import bicycle_model, select_future
 predictor_selection = {'base': Predictor,
                        'dipp': Predictor,
-                       'risk': RiskMapPre}
+                       'risk': RiskMapPre,
+                       'esp': RiskMapPre,
+                       }
 
 
 planner_selection = {'base': BasePlanner,
                      'dipp': MotionPlanner,
-                     'risk': RiskMapPlanner}
+                     'risk': RiskMapPlanner,
+                     'esp':EularSamplingPlanner,
+                     }
 
 def save_checkpoint(epoch, save_name, cfg, model):
     """ Save model to file. """
@@ -79,6 +83,20 @@ def inference(batch, predictor, planner, args, use_planning):
 
             plan = final_values["control_variables"].view(-1, 50, 2)
             plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+
+    elif planner.name=='esp':
+            planner:EularSamplingPlanner=planner
+            u, prediction = select_future(plans, predictions, scores)
+
+            planner_inputs = {
+                "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state, # including neighbor cars
+                'init_guess_u': u,
+            }
+
+            plan,u = planner.plan(planner_inputs)
+    
     elif planner.name=='risk':
         u, prediction = select_future(plans, predictions, scores)
         u = torch.cat([

@@ -13,7 +13,7 @@ from torch import nn, optim
 from common_utils import inference, load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
 from utils.riskmap.utils import get_u_from_X, has_nan, load_cfg_here
-from model.planner import BasePlanner, MotionPlanner, Planner, RiskMapPlanner
+from model.planner import BasePlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
 from model.predictor import Predictor, VectorField
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
@@ -54,10 +54,11 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
         elif planner.name=='dipp':
-            plan, prediction = select_future(plans, predictions, best_mode)
+            planner: MotionPlanner = planner
+            u, prediction = select_future(plans, predictions, best_mode)
 
             planner_inputs = {
-                "control_variables": plan.view(-1, 100), # initial control sequence
+                "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state # including neighbor cars
@@ -67,13 +68,32 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
             final_values, info = planner.layer.forward(planner_inputs)
-            plan = final_values["control_variables"].view(-1, 50, 2)
-            plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+            u = final_values["control_variables"].view(-1, 50, 2)
+            plan = bicycle_model(u, ego[:, -1])[:, :, :3]
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
+
+        elif planner.name=='esp':
+            planner:EularSamplingPlanner=planner
+            u, prediction = select_future(plans, predictions, best_mode)
+
+            planner_inputs = {
+                # "control_variables": u.view(-1, 100), # initial control sequence
+                "predictions": prediction.detach(), # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state, # including neighbor cars
+                'init_guess_u': u,
+            }
+
+            plan,u = planner.plan(planner_inputs)
+            plan_loss = 1e-3*planner.get_loss(ground_truth[...,0:1,:,:])
+            plan_loss += F.smooth_l1_loss(plan[..., :3], ground_truth[:, 0, :, :3]) 
+            plan_loss += F.smooth_l1_loss(plan[:, -1, :3], ground_truth[:, 0, -1, :3])
+            loss += plan_loss
+
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.vf_map
@@ -100,6 +120,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
             loss += vf_map.get_loss(ground_truth[...,0:1,:,:], 
                                     planner.gt_sample['X'])
+            
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
@@ -264,6 +285,8 @@ def model_training():
             planner = MotionPlanner(trajectory_len, feature_len, device= args.local_rank)
         if cfg['planner']['name'] == 'risk':
             planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)
+        if cfg['planner']['name'] == 'esp':
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.local_rank)
     else:

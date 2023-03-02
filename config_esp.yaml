@@ -1,0 +1,21 @@
+# console
+model_cfg:
+  name: 'esp'
+  future_steps: 50
+  mode_num: 8
+
+planner: 
+  name: 'esp'
+
+  cov_base: 0.2
+  cov_inc: 1.e-4
+  gt_sample_num: 150
+  plan_sample_num: 200
+
+  meter2risk: 
+    name: 'Coefficient'
+    V_dim: 9
+    TVC: False
+    input_shape: 256
+    th: 1
+    idv: True
