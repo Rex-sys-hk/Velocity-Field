@@ -332,6 +332,9 @@ class Predictor(nn.Module):
         self.name = 'dipp'
         if self.name != name:
             print('[WARNING]: Module name and config name different')
+            print(f'set name is {name}')
+            print(f'module name is {self.name}')
+
         self._future_steps = future_steps
 
         # agent layer
@@ -399,6 +402,8 @@ class RiskMapPre(nn.Module):
         self.name = 'risk'
         if self.name != name:
             print('[WARNING]: Module name and config name different')
+            print(f'set name is {name}')
+            print(f'module name is {self.name}')
         self._future_steps = future_steps
         cfg = load_cfg_here()
         self.cfg = cfg
