@@ -1,6 +1,7 @@
 import glob
 import random
 import os
+import shutil
 from os import path
 import argparse
 import tensorflow as tf
@@ -395,6 +396,11 @@ class DataProcess(object):
                     filename = f"{save_path}/{scenario_id}_{timestep}.npz"
                     if path.exists(filename):
                         continue
+                    filename_ = f"{args.processed_path}/{scenario_id}_{timestep}.npz"
+                    if path.exists(filename_):
+                        shutil.move(filename_,filename)
+                        print(f'[info]:move {filename_} to {filename}', flush=True)
+                        continue
                     # process data
                     ego = self.ego_process(sdc_id, timestep, parsed_data.tracks)
                     ref_line = self.route_process(sdc_id, timestep, self.current_xyh, parsed_data.tracks)
@@ -431,6 +437,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Data Processing')
     parser.add_argument('--load_path', type=str, help='path to dataset files')
     parser.add_argument('--save_path', type=str, help='path to save processed data')
+    parser.add_argument('--processed_path', type=str, help='path to save processed data',default='dataset/processed/')
     parser.add_argument('--use_multiprocessing', action="store_true", help='if use multiprocessing', default=False)
     
     args = parser.parse_args()
@@ -440,7 +447,7 @@ if __name__ == "__main__":
     
     if args.use_multiprocessing:
         count = 0
-        with Pool(94) as p:
+        with Pool(24) as p:
             for _ in p.imap_unordered(multiprocessing, data_files):
                 count+=1
                 print(count,'/',len(data_files))
