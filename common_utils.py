@@ -45,6 +45,10 @@ def load_checkpoint(model_file, map_location):
     return predictor, epoch
 
 def inference(batch, predictor, planner, args, use_planning):
+    try:
+        args.device=args.local_rank if args.local_rank else args.device
+    except:
+        pass
     ego = batch[0].to(args.device)
     neighbors = batch[1].to(args.device)
     map_lanes = batch[2].to(args.device)
