@@ -437,8 +437,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Data Processing')
     parser.add_argument('--load_path', type=str, help='path to dataset files')
     parser.add_argument('--save_path', type=str, help='path to save processed data')
-    parser.add_argument('--processed_path', type=str, help='path to save processed data',default='dataset/processed/')
+    parser.add_argument('--processed_path', type=str, help='path to save processed data',default='dataset/processed')
     parser.add_argument('--use_multiprocessing', action="store_true", help='if use multiprocessing', default=False)
+    parser.add_argument('--cpu_num', action="store_true", help='if use multiprocessing', default=22)
     
     args = parser.parse_args()
     data_files = glob.glob(args.load_path+'/*')
@@ -447,7 +448,7 @@ if __name__ == "__main__":
     
     if args.use_multiprocessing:
         count = 0
-        with Pool(24) as p:
+        with Pool(args.cpu_num) as p:
             for _ in p.imap_unordered(multiprocessing, data_files):
                 count+=1
                 print(count,'/',len(data_files))
