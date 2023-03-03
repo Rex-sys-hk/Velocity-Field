@@ -380,8 +380,13 @@ class DataProcess(object):
     def process_data(self, save_path, viz=True):
         for data_file in self.data_files:
             dataset = tf.data.TFRecordDataset(data_file)
-            self.pbar = tqdm(total=len(list(dataset)))
-            self.pbar.set_description(f"Processing {data_file.split('/')[-1]}")
+            try:
+                self.pbar = tqdm(total=len(list(dataset)))
+                self.pbar.set_description(f"Processing {data_file.split('/')[-1]}")
+            except:
+                os.remove(data_file)
+                print(f'{data_file} can not read, removed', flush=True)
+                continue
 
             for data in dataset:
                 parsed_data = scenario_pb2.Scenario()
@@ -439,7 +444,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_path', type=str, help='path to save processed data')
     parser.add_argument('--processed_path', type=str, help='path to save processed data',default='dataset/processed')
     parser.add_argument('--use_multiprocessing', action="store_true", help='if use multiprocessing', default=False)
-    parser.add_argument('--cpu_num', action="store_true", help='if use multiprocessing', default=22)
+    parser.add_argument('--cpu_num', type=int, help='if use multiprocessing', default=22)
     
     args = parser.parse_args()
     data_files = glob.glob(args.load_path+'/*')
