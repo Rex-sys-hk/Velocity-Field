@@ -59,7 +59,7 @@ def open_loop_test():
     # iterate test files
     for i,file in enumerate(files[args.test_pkg_sid:args.test_pkg_num]):
         scenarios = tf.data.TFRecordDataset(file)
-        logging.info(f'\n >>>[{i}/{len(files)}]:')
+        logging.warning(f'>>>file [{i}/{len(files)}]:')
         # iterate scenarios in the test file
         length = [1 for s in scenarios]
         for ii, scenario in enumerate(scenarios):
@@ -75,22 +75,33 @@ def open_loop_test():
             processor.build_map(parsed_data.map_features, parsed_data.dynamic_map_states)
 
             # get a testing scenario
-            for timestep in range(20, len(timesteps)-50, 10):
+            for timestep in tqdm(range(20, len(timesteps)-50, 10), desc=f'>>>scenario {ii}/{len(length)}'):
                 logging.info(f"Scenario: {scenario_id} Time: {timestep}")
                 
                 # prepare data
-                input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
-                ego = torch.from_numpy(input_data[0]).to(args.device)
-                neighbors = torch.from_numpy(input_data[1]).to(args.device)
-                # lanes = torch.from_numpy(input_data[2]).to(args.device)
-                # crosswalks = torch.from_numpy(input_data[3]).to(args.device)
-                ref_line = torch.from_numpy(input_data[4]).to(args.device)
-                neighbor_ids, norm_gt_data, gt_data = input_data[5], input_data[6], input_data[7]
-                current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-                
-                batch = []
-                for i in range(5):
-                    batch.append(torch.from_numpy(input_data[i]))
+                if not os.path.exists(f'{args.test_processed}/{scenario_id}_{timestep}.npz') or args.render:
+                    input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
+                    ego = torch.from_numpy(input_data[0]).to(args.device)
+                    neighbors = torch.from_numpy(input_data[1]).to(args.device)
+                    lanes = torch.from_numpy(input_data[2]).to(args.device)
+                    crosswalks = torch.from_numpy(input_data[3]).to(args.device)
+                    ref_line = torch.from_numpy(input_data[4]).to(args.device)
+                    neighbor_ids, norm_gt_data, gt_data = input_data[5], input_data[6], input_data[7]
+                    current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+                    batch = []
+                    for i in range(5):
+                        batch.append(torch.from_numpy(input_data[i]))
+                else:
+                    data = np.load(f'{args.test_processed}/{scenario_id}_{timestep}.npz',allow_pickle=True)
+                    logging.info(f'Read data from {args.test_processed}/{scenario_id}_{timestep}.npz')
+                    ego = torch.from_numpy(data['ego']).unsqueeze(0)
+                    neighbors = torch.from_numpy(data['neighbors']).unsqueeze(0)
+                    ref_line = torch.from_numpy(data['ref_line'] ).unsqueeze(0)
+                    lanes = torch.from_numpy(data['map_lanes']).unsqueeze(0)
+                    crosswalks = torch.from_numpy(data['map_crosswalks']).unsqueeze(0)
+                    current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+                    norm_gt_data = data['gt_future_states']
+                    batch = [ego,neighbors,lanes,crosswalks,ref_line]
                 plan, prediction = inference(batch, predictor, planner, args, args.use_planning)
                 plan = plan.cpu().numpy()[0]
 
@@ -216,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument('--name', type=str, help='log name (default: "Test1")', default="Test1")
     parser.add_argument('--config', type=str, help='path to the config file', default= None)
     parser.add_argument('--test_set', type=str, help='path to testing datasets')
+    parser.add_argument('--test_processed', type=str, help='path to processed testing datasets')
     parser.add_argument('--test_pkg_sid', type=int, help='start package counts', default=0)
     parser.add_argument('--test_pkg_num', type=int, help='test package counts', default=3)
     parser.add_argument('--model_path', type=str, help='path to saved model')
@@ -227,5 +239,7 @@ if __name__ == "__main__":
     cfg_file = args.config if args.config else 'config.yaml'
     os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)
     cfg = load_cfg_here()
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.WARNING)
     # Run
     open_loop_test()

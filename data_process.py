@@ -403,8 +403,8 @@ class DataProcess(object):
                         continue
                     filename_ = f"{args.processed_path}/{scenario_id}_{timestep}.npz"
                     if path.exists(filename_):
-                        shutil.move(filename_,filename)
-                        print(f'[info]:move {filename_} to {filename}', flush=True)
+                        shutil.copy(filename_,filename)
+                        print(f'[info]:copy {filename_} to {filename}', flush=True)
                         continue
                     # process data
                     ego = self.ego_process(sdc_id, timestep, parsed_data.tracks)

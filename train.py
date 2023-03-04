@@ -1,4 +1,5 @@
 # %%
+import math
 import torch
 import sys
 import csv
@@ -258,6 +259,7 @@ def model_training():
     args.world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else args.world_size
     set_seed(args.seed+args.local_rank)
     start_epoch = 0
+    best = math.inf
     try:
         dist.init_process_group(backend="nccl")
         distributed = True
@@ -358,8 +360,13 @@ def model_training():
 
         # save model at the end of epoch
         if args.local_rank==0 or not distributed:
-            ckpt_file_name = f'training_log/{args.name}/ckpt/model_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
+            ckpt_file_name = f'training_log/{args.name}/ckpt/model_newest.pth.tar'
             save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
+            if val_metrics[0]<best and epoch>=50:
+                ckpt_file_name = f'training_log/{args.name}/ckpt/model_best_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
+                save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
+                best = val_metrics[0]
+                
         if distributed:
             dist.barrier()
     if distributed:
