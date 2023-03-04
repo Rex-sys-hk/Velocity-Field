@@ -39,7 +39,7 @@ def open_loop_test():
     prediction_ADE, prediction_FDE = [], []
 
     # load model
-    predictor, start_epoch = load_checkpoint(args.model_path, map_location='cpu')
+    predictor, start_epoch, _ = load_checkpoint(args.model_path, map_location='cpu')
     predictor.to(args.device)
     logging.info(f'ckpt successful loaded from {args.model_path}')
     predictor.eval()

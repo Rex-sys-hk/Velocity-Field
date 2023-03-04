@@ -3,6 +3,7 @@ model_cfg:
   name: 'dipp'
   future_steps: 50
   mode_num: 8
+  gamma: 0.99
 
 planner: 
   name: 'dipp'

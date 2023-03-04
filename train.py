@@ -275,7 +275,7 @@ def model_training():
         predictor = predictor_selection[cfg['model_cfg']['name']](**cfg['model_cfg']) #Predictor(50)
     else:
         map_location = {'cuda:%d' % 0: 'cuda:%d' % args.local_rank}
-        predictor, start_epoch = load_checkpoint(args.ckpt, map_location)
+        predictor, start_epoch, lr = load_checkpoint(args.ckpt, map_location)
         logging.info(f'ckpt successful loaded from {args.ckpt}')
 
 
@@ -296,8 +296,11 @@ def model_training():
 
     predictor = predictor.to(args.local_rank)
     # set up optimizer
-    optimizer = optim.AdamW(predictor.parameters(), lr=args.learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=1.)
+    if args.ckpt:
+        optimizer = optim.AdamW(predictor.parameters(), lr=lr)
+    else:
+        optimizer = optim.AdamW(predictor.parameters(), lr=args.learning_rate)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=cfg['model_cfg']['gamma'])
 
     # training parameters
     train_epochs = args.train_epochs

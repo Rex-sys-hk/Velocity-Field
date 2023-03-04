@@ -327,7 +327,7 @@ class VFMapDecoder(nn.Module):
 
 # Build predictor
 class Predictor(nn.Module):
-    def __init__(self, name:str = 'dipp', future_steps = 50, mode_num = 3):
+    def __init__(self, name:str = 'dipp', future_steps = 50, mode_num = 3, gamma = 1.):
         super(Predictor, self).__init__()
         self.name = 'dipp'
         if self.name != name:
@@ -397,7 +397,7 @@ class Predictor(nn.Module):
 
     
 class RiskMapPre(nn.Module):
-    def __init__(self, name:str = 'risk', future_steps = 50, mode_num = 3):
+    def __init__(self, name:str = 'risk', future_steps = 50, mode_num = 3, gamma = 1.):
         super(RiskMapPre, self).__init__()
         self.name = 'risk'
         if self.name != name:

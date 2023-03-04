@@ -24,20 +24,21 @@ planner_selection = {'base': BasePlanner,
                      'esp':EularSamplingPlanner,
                      }
 
-def save_checkpoint(epoch, save_name, cfg, model):
+def save_checkpoint(epoch, save_name, cfg, model, lr=1e-4):
     """ Save model to file. """
     model_dict = {'epoch': epoch+1,
                   'state_dict': model.state_dict(),
                   'model_cfg': cfg['model_cfg'],
+                  'lr': lr,
                   }
 
     print("Saving model to {}".format(save_name))
     torch.save(model_dict, save_name)
 
-def load_checkpoint(model_file, map_location):
+def load_checkpoint(model_file, map_location = 'cpu'):
     """ Load a model from a file. """
     print("Loading model from {}".format(model_file))
-    model_dict = torch.load(model_file,map_location='cpu')
+    model_dict = torch.load(model_file,map_location=map_location)
     ## save loaded model params
     print('>>>> Model config is:')
     for k,v in model_dict['model_cfg'].items():
@@ -46,7 +47,7 @@ def load_checkpoint(model_file, map_location):
     predictor.load_state_dict(state_dict=model_dict['state_dict'])
     epoch = model_dict['epoch']
     print('load succeed')
-    return predictor, epoch
+    return predictor, epoch, model_dict['lr']
 
 def inference(batch, predictor, planner, args, use_planning):
     try:
