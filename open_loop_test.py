@@ -48,11 +48,13 @@ def open_loop_test():
     if args.use_planning:
         if cfg['planner']['name'] == 'dipp':
             trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
+            planner = MotionPlanner(trajectory_len, feature_len, device=args.device)
         if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
+            planner = RiskMapPlanner(predictor.meter2risk, device=args.device)
         if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.device)
+            planner = BasePlanner(device=args.device)
+        if cfg['planner']['name'] == 'esp':
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
     else:
         planner = None
 

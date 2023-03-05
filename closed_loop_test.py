@@ -53,6 +53,8 @@ def closed_loop_test():
             planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.device)
+        if cfg['planner']['name'] == 'esp':
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
     else:
         planner = None
     for i,file in enumerate(files[args.test_pkg_sid:args.test_pkg_num]):

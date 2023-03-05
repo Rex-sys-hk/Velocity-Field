@@ -46,8 +46,9 @@ def load_checkpoint(model_file, map_location = 'cpu'):
     predictor = predictor_selection[f"{model_dict['model_cfg']['name']}"](**model_dict['model_cfg'])
     predictor.load_state_dict(state_dict=model_dict['state_dict'])
     epoch = model_dict['epoch']
+    lr = model_dict['lr']  if 'lr' in model_dict.keys() else 1e-4
     print('load succeed')
-    return predictor, epoch, model_dict['lr']
+    return predictor, epoch, lr
 
 def inference(batch, predictor, planner, args, use_planning):
     try:
