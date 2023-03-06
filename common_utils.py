@@ -24,13 +24,20 @@ planner_selection = {'base': BasePlanner,
                      'esp':EularSamplingPlanner,
                      }
 
-def save_checkpoint(epoch, save_name, cfg, model, lr=1e-4):
+def save_checkpoint(epoch, save_name, cfg, model, lr=1e-4, dist=False):
     """ Save model to file. """
-    model_dict = {'epoch': epoch+1,
-                  'state_dict': model.state_dict(),
-                  'model_cfg': cfg['model_cfg'],
-                  'lr': lr,
-                  }
+    if dist:
+        model_dict = {'epoch': epoch+1,
+                    'state_dict': model.module.state_dict(),
+                    'model_cfg': cfg['model_cfg'],
+                    'lr': lr,
+                    }
+    else:
+        model_dict = {'epoch': epoch+1,
+                    'state_dict': model.state_dict(),
+                    'model_cfg': cfg['model_cfg'],
+                    'lr': lr,
+                    }        
 
     print("Saving model to {}".format(save_name))
     torch.save(model_dict, save_name)

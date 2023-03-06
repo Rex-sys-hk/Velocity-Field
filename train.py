@@ -364,10 +364,10 @@ def model_training():
         # save model at the end of epoch
         if args.local_rank==0 or not distributed:
             ckpt_file_name = f'training_log/{args.name}/ckpt/model_newest.pth.tar'
-            save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
-            if val_metrics[0]<best and epoch>=50:
+            save_checkpoint(epoch,ckpt_file_name,cfg,predictor,dist=distributed)
+            if val_metrics[0]<best:
                 ckpt_file_name = f'training_log/{args.name}/ckpt/model_best_{epoch+1}_{val_metrics[0]:.4f}.pth.tar'
-                save_checkpoint(epoch,ckpt_file_name,cfg,predictor)
+                save_checkpoint(epoch,ckpt_file_name,cfg,predictor,dist=distributed)
                 best = val_metrics[0]
                 
         if distributed:
