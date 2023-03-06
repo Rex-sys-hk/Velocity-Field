@@ -32,13 +32,21 @@ class DrivingData(Dataset):
         return len(self.data_list)
 
     def __getitem__(self, idx):
-        data = np.load(self.data_list[idx],allow_pickle=True)
-        if type(data) is str:
-            print(type(data))
-            print(os.path.isfile(data))
-            os.remove(data)
-            print("file %s as a pickle failed, removed" % repr(data))
-            print(os.path.isfile(data))
+        try:
+            data = np.load(self.data_list[idx],allow_pickle=True)
+            if type(data) is str:
+                print(type(data))
+                print(os.path.isfile(data))
+                os.remove(data)
+                print("file %s as a pickle failed, removed" % repr(data))
+                print(os.path.isfile(data))
+                return self.__getitem__(idx+1)
+        except:
+            print(f'fail loading file {self.data_list[idx]}')
+            if os.path.exists(self.data_list[idx]):
+                print(f'removing file {self.data_list[idx]}')
+                os.remove(self.data_list[idx])
+            return self.__getitem__(idx+1)
         ego = data['ego']
         neighbors = data['neighbors']
         ref_line = data['ref_line'] 
