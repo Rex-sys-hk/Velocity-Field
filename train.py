@@ -97,7 +97,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
 
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
-            vf_map:VectorField = predictor.vf_map
+            vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
             u, prediction = select_future(plans, predictions, best_mode)
             u = torch.cat([
                             u[...,0:1].clamp(-5,5),
@@ -111,7 +111,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state,
-                "vf_map": predictor.vf_map,
+                "vf_map": vf_map,
                 'init_guess_u': u,
             }
             # plan loss
@@ -140,7 +140,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.autoscale(False)
             ## special output
             if use_planning and planner.name=='risk':
-                vf_map:VectorField = predictor.vf_map
+                vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
 
                 vf_map.plot(planner.sample_plan['X'][0:1])
                 for traj in planner.sample_plan['X'][0].cpu().detach():
@@ -211,7 +211,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, d
     for it, batch in enumerate(data_loader):
         tb_iters+=1
         # prepare data
-        plan, prediction = inference(batch, predictor, planner, args, use_planning)
+        plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
         ground_truth = batch[5].to(args.local_rank)
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
         # compute metrics
@@ -314,7 +314,7 @@ def model_training():
                 predictor,
                 device_ids=[args.local_rank],
                 output_device=args.local_rank,
-                find_unused_parameters=True
+                find_unused_parameters=False
                 )
         train_sampler = DSample(train_set,shuffle=True)
         valid_sampler = DSample(valid_set,shuffle=False)

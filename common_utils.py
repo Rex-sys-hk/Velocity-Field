@@ -57,7 +57,7 @@ def load_checkpoint(model_file, map_location = 'cpu'):
     print('load succeed')
     return predictor, epoch, lr
 
-def inference(batch, predictor, planner, args, use_planning):
+def inference(batch, predictor, planner, args, use_planning, distributed=False):
     try:
         args.device=args.local_rank if args.local_rank else args.device
     except:
@@ -113,11 +113,12 @@ def inference(batch, predictor, planner, args, use_planning):
                 pi_2_pi(u[...,1:2])
                 ],dim=-1)
         plan = bicycle_model(u, ego[:, -1])
+        vf_map = predictor.module.vf_map if distributed else predictor.vf_map
         planner_inputs = {
             "predictions": prediction, # prediction for surrounding vehicles 
             "ref_line_info": ref_line_info,
             "current_state": current_state,
-            "vf_map": predictor.vf_map,
+            "vf_map": vf_map,
             'init_guess_u': u,
         }
         with torch.no_grad():

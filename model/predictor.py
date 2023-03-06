@@ -178,6 +178,20 @@ class AVDecoder(nn.Module):
         cost_function_weights = torch.cat([self.cost(dummy)[:, :7] * self.scale, self.constraint], dim=-1)
 
         return actions, cost_function_weights
+    
+class AVDecoderNc(nn.Module):
+    def __init__(self, future_steps=50, feature_len=9):
+        super(AVDecoderNc, self).__init__()
+        self._future_steps = future_steps
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+        self.control = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU(), nn.Linear(256, future_steps*2))
+
+    def forward(self, agent_map, agent_agent):
+        feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1)], dim=-1)
+        actions = self.control(feature).view(-1, self.mode_num , self._future_steps, 2)
+
+        return actions, 0
 
 class Score(nn.Module):
     def __init__(self):
@@ -200,6 +214,9 @@ class Score(nn.Module):
         scores = self.decode(feature).squeeze(-1)
 
         return scores
+# class VectorField(nn.Module):
+#     def __init__(self):
+#         super(VectorField, self).__init__()
 class VectorField():
     def __init__(self) -> None:
         self.rear_range = 20.
@@ -421,7 +438,7 @@ class RiskMapPre(nn.Module):
         self.agent_agent = Agent2Agent()
 
         # decode layers
-        self.plan = AVDecoder(self._future_steps)
+        self.plan = AVDecoderNc(self._future_steps)
         self.predict = AgentDecoder(self._future_steps)
         self.score = Score()
 
