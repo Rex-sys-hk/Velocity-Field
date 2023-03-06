@@ -82,7 +82,11 @@ def open_loop_test():
                 
                 # prepare data
                 if not os.path.exists(f'{args.test_processed}/{scenario_id}_{timestep}.npz') or args.render:
-                    input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
+                    try:
+                        input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
+                    except:
+                        print(f'Scenario: {scenario_id} Time: {timestep} is not usable, skipped')
+                        continue
                     ego = torch.from_numpy(input_data[0]).to(args.device)
                     neighbors = torch.from_numpy(input_data[1]).to(args.device)
                     lanes = torch.from_numpy(input_data[2]).to(args.device)
