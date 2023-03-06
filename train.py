@@ -321,6 +321,8 @@ def model_training():
     else:
         train_sampler = RandomSampler(train_set)
         valid_sampler = SequentialSampler(valid_set)
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=args.num_workers,sampler=train_sampler)
+    valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=args.num_workers,sampler=valid_sampler)
 
     logging.info("Dataset Prepared: {} train data, {} validation data\n".format(len(train_set), len(valid_set)))
     # %% begin training
@@ -333,9 +335,9 @@ def model_training():
                 use_planning = False
             else:
                 use_planning = True
-        btsz = batch_size if args.use_planning else batch_size*4
-        train_loader = DataLoader(train_set, batch_size=btsz, num_workers=args.num_workers,sampler=train_sampler)
-        valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
+        # btsz = batch_size if args.use_planning else batch_size*4
+        # train_loader = DataLoader(train_set, batch_size=btsz, num_workers=args.num_workers,sampler=train_sampler)
+        # valid_loader = DataLoader(valid_set, batch_size=btsz, num_workers=args.num_workers,sampler=valid_sampler)
 
         train_loss, train_metrics = train_epoch(train_loader, predictor, planner, optimizer, use_planning, epoch, distributed)
         val_loss, val_metrics = valid_epoch(valid_loader, predictor, planner, use_planning, epoch, distributed)
