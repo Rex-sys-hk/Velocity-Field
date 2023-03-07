@@ -219,11 +219,11 @@ class Score(nn.Module):
 #         super(VectorField, self).__init__()
 class VectorField():
     def __init__(self) -> None:
-        self.rear_range = 20.
-        self.front_range = 150.
-        self.side_range = 30.
-        self.steps_s = int(100)
-        self.steps_l = int(60)
+        self.rear_range = 10.
+        self.front_range = 140.
+        self.side_range = 60.
+        self.steps_s = int(150)
+        self.steps_l = int(120)
         self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
         self.resolution_l = 2*self.side_range/self.steps_l
         # make grid
