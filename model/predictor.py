@@ -220,10 +220,10 @@ class Score(nn.Module):
 class VectorField():
     def __init__(self) -> None:
         self.rear_range = 20.
-        self.front_range = 100.
-        self.side_range = 40.
-        self.steps_s = int(120)
-        self.steps_l = int(80)
+        self.front_range = 150.
+        self.side_range = 30.
+        self.steps_s = int(100)
+        self.steps_l = int(60)
         self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
         self.resolution_l = 2*self.side_range/self.steps_l
         # make grid
@@ -317,8 +317,8 @@ class VFMapDecoder(nn.Module):
         super(VFMapDecoder, self).__init__()
         self.vf = VectorField()
         self.grid_points = self.vf.grid_points
-        self.map_feat_emb = nn.Linear(256, 64)
-        self.emb = nn.Linear(2, 64)
+        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(),nn.Dropout(0.1),nn.Linear(32, 64))
         self.cross_attention = nn.MultiheadAttention(64, 2, 0.1, batch_first=True)
         self.transformer = nn.Sequential(nn.LayerNorm(64), nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
 
