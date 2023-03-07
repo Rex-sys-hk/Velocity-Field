@@ -111,12 +111,13 @@ class EularSamplingPlanner(Planner):
     def plan(self, context):
         self.context = context
         self.sample_plan = self.get_sample(context)
-        self.cost = cost_function_sample(self.sample_plan['u'], 
+        cost = cost_function_sample(self.sample_plan['u'], 
                                           context['current_state'], 
                                           context['predictions'], 
                                           context['ref_line_info'], 
-                                          self.cost_function_weights())
-        self.plan_result = self.selector(self.cost.mean(dim=-1), self.sample_plan)
+                                          )
+        cost = self.cost_function_weights(cost)
+        self.plan_result = self.selector(cost.mean(dim=[-1,-2]), self.sample_plan)
         return self.plan_result
 
     def get_loss(self, gt, tb_iter=0, tb_writer=None):
@@ -131,10 +132,11 @@ class EularSamplingPlanner(Planner):
                                     self.context['current_state'], 
                                     self.context['predictions'], 
                                     self.context['ref_line_info'], 
-                                    self.cost_function_weights())
-
+                                    )
+        cost = self.cost_function_weights(cost)
         diffXd = torch.norm(
             self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+        cost = cost.mean(-1)
         loss = 0
         loss += 1e-4*(cost**2).mean()
 
@@ -564,19 +566,20 @@ class TmpContainer():
     def __init__(self, tensor=None) -> None:
         self.tensor = tensor
 
-def cost_function_sample(control_variables, current_state, predictions, ref_line, cost_function_weights):
+def cost_function_sample(control_variables, current_state, predictions, ref_line):
     control_variables = TmpContainer(control_variables)
     current_state = TmpContainer(current_state)
     predictions = TmpContainer(predictions)
     ref_line = TmpContainer(ref_line)
-    cost = 0
-    cost += cost_function_weights[0]*_speed([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[1]*_acceleration([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[2]*_jerk([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[3]*_steering([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[4]*_steering_change([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[5]*_lane_xy([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[6]*_lane_theta([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[7]*_red_light_violation([control_variables],[ref_line, current_state])
-    cost += cost_function_weights[8]*_safety([control_variables],[predictions, current_state, ref_line])
+    cost = {
+        'speed':_speed([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'acceleration':_acceleration([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'jerk':_jerk([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'steering':_steering([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'steering_change':_steering_change([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'lane_xy':_lane_xy([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'lane_theta':_lane_theta([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'red_light_violation':_red_light_violation([control_variables],[ref_line, current_state]).unsqueeze(-1),
+        'safety':_safety([control_variables],[predictions, current_state, ref_line]).unsqueeze(-1),
+        }
     return cost

@@ -80,7 +80,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
             u, prediction = select_future(plans, predictions, best_mode)
-
+            u = torch.cat([u[...,0:1].clamp(-5,5),
+                           pi_2_pi(u[...,1:2])
+                           ],dim=-1)
+            init_guess = bicycle_model(u, ego[:, -1])
+            loss += F.smooth_l1_loss(init_guess[..., :3], ground_truth[:, 0, :, :3]) 
+            loss += F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -90,10 +95,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             }
 
             plan,u = planner.plan(planner_inputs)
-            plan_loss = 1e-3*planner.get_loss(ground_truth[...,0:1,:,:])
-            plan_loss += F.smooth_l1_loss(plan[..., :3], ground_truth[:, 0, :, :3]) 
-            plan_loss += F.smooth_l1_loss(plan[:, -1, :3], ground_truth[:, 0, -1, :3])
-            loss += plan_loss
+            loss += planner.get_loss(ground_truth[...,0:1,:,:], tb_iter=tb_iters, tb_writer=tbwriter)
 
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
@@ -139,16 +141,16 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.title(f'{args.name}')
             plt.autoscale(False)
             ## special output
-            if use_planning and planner.name=='risk':
-                vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-
-                vf_map.plot(planner.sample_plan['X'][0:1])
-                for traj in planner.sample_plan['X'][0].cpu().detach():
-                    plt.plot(traj[...,0],traj[...,1],'r',lw=0.5)
-
-                vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
-                for traj in planner.gt_sample['X'][0].cpu().detach():
-                    plt.plot(traj[...,0],traj[...,1],'g',lw=0.5)
+            if use_planning:
+                if planner.name in ['risk','esp']:
+                    for traj in planner.gt_sample['X'][0].cpu().detach():
+                        plt.plot(traj[...,0],traj[...,1],'g',lw=0.5)
+                    for traj in planner.sample_plan['X'][0].cpu().detach():
+                        plt.plot(traj[...,0],traj[...,1],'r',lw=0.5)
+                if planner.name in ['risk']:
+                    vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
+                    vf_map.plot(planner.sample_plan['X'][0:1])
+                    vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
             ## general output
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), lw=1, label='reflane')
             plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=1,label='plan result')

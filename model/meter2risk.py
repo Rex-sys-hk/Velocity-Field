@@ -12,10 +12,10 @@ class Meter2Risk(nn.Module):
         ## define some common params here
         self.device = device
         cfg = load_cfg_here()['planner']['meter2risk']
-        self.TVC=cfg['TVC']
         self.V_dim=cfg['V_dim']
         self.th=cfg['th']
-        self.idv= cfg['idv']
+        self.TVC=cfg['TVC'] if 'TVC' in cfg.keys() else False
+        self.idv= cfg['idv'] if 'idv' in cfg.keys() else False
         self.latent_feature = None
 
     def forward(self):
@@ -854,24 +854,40 @@ class SimpleCostCoef(Meter2Risk):
         coeff = self.get_coeff(self.latent_feature['agent_map'][...,0,:].max(dim=1).values).reshape(-1,1,self.th,self.map_elements)
         return coeff*raw_meters
     
+class CostModelTV(Meter2Risk):
+    def __init__(self, device: str = 'cuda') -> None:
+        super().__init__(device)
+        self.coeff = nn.Sequential(
+                        nn.Linear(self.th*self.V_dim,128),
+                        nn.GELU(),
+                        nn.Linear(128,128),
+                        nn.Dropout(0.1),
+                        nn.GELU(),
+                        nn.Linear(128,self.th*self.V_dim),
+                        ).to(device)
+
+    def forward(self, raw_meters):
+        raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
+        b,s,t,d = raw_meters_vec.shape
+        return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
+    
 class CostModel(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
         super().__init__(device)
-        self.th = 50
-        self.map_elements = 7
         self.coeff = nn.Sequential(
-                        nn.Linear(self.th*self.map_elements,128),
+                        nn.Linear(1*self.V_dim,128),
                         nn.GELU(),
                         nn.Linear(128,128),
+                        nn.Dropout(0.1),
                         nn.GELU(),
-                        nn.Linear(128,self.th*self.map_elements),
+                        nn.Linear(128,1*self.V_dim),
                         ).to(device)
 
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
-        return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
+        return self.coeff(raw_meters_vec.mean(dim=-2)).reshape(b,s,1,d)
     
 class Coefficient(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
@@ -888,5 +904,6 @@ CostModules = {
     'linear_map_vv':LinearMap_vv,
     'simple_coef':SimpleCostCoef,
     'CostModel':CostModel,
+    'CostModelTV':CostModelTV,
     'Coefficient':Coefficient,
 }

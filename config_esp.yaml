@@ -14,9 +14,9 @@ planner:
   plan_sample_num: 200
 
   meter2risk: 
-    name: 'Coefficient'
+    name: 'CostModelTV'
     V_dim: 9
-    TVC: False
-    input_shape: 256
-    th: 1
-    idv: True
+    th: 50
+    # input_shape: 256
+    # TVC: False
+    # idv: True
