@@ -138,7 +138,7 @@ class EularSamplingPlanner(Planner):
             self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
         cost = cost.mean(-1)
         loss = 0
-        loss += 1e-4*(cost**2).mean()
+        loss += 1e-3*torch.norm(cost,dim=-1).mean()
 
         prob = torch.softmax(-torch.mean(cost[..., 10:],dim=-1), dim=1)
         dis_prob = torch.softmax(-torch.mean(diffXd[..., 10:],dim=-1), dim=1)
@@ -154,12 +154,10 @@ class RiskMapPlanner(Planner):
         super(RiskMapPlanner, self).__init__(device, test)
         self.name = 'risk'
         # self.lattice_planner = torchLatticePlanner(device, test=test)
-        self.map = Map(device, test=False)
         self.hand_prefer = torch.softmax(
             torch.tensor(self.cfg['risk_preference'], device=device), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
-        # self.loss_calculator = GetLoss(meter2risk,self.map,device)
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
 
         self.cov_base = 0.2
@@ -187,7 +185,13 @@ class RiskMapPlanner(Planner):
     def plan(self, context):
         self.context = context
         self.sample_plan = self.get_sample(context,sample_num=self.plan_sample_num)
-        self.meter = self.map.get_meter(self.sample_plan, context)
+        self.meter = risk_cost_function_sample(
+                                            self.sample_plan, 
+                                            self.context['current_state'], 
+                                            self.context['predictions'], 
+                                            self.context['ref_line_info'], 
+                                            self.context['vf_map']
+                                                )
         self.risks = self.meter2risk(self.meter)
         self.plan_result = self.selector(self.risks, self.sample_plan)
         return self.plan_result
@@ -209,21 +213,28 @@ class RiskMapPlanner(Planner):
         """
         must be called after forward
         """
-        # detailed_gt, u_gt = convert2detail_state(gt)
-        u = get_u_from_X(gt,self.map.ego_current_state)
+        u = get_u_from_X(gt,self.context['current_state'][:,0:1])
         self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
                                          cov=self.cov_base*(self.cov_inc**tb_iter), 
                                          sample_num=self.gt_sample_num)
-        raw_meter = self.map.get_vec_map_meter(self.gt_sample)
+        raw_meter = risk_cost_function_sample(
+                                            self.gt_sample, 
+                                            self.context['current_state'], 
+                                            self.context['predictions'], 
+                                            self.context['ref_line_info'], 
+                                            self.context['vf_map']
+                                            )
         gt_risk = self.meter2risk(raw_meter)
 
-        diffXd = torch.norm(
-            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+
         gt_risk = gt_risk.mean(dim=-1)
 
         loss = 0
-        loss += 1e-4*(gt_risk**2).mean()
-
+        # regularization
+        loss += 1e-3*torch.norm(gt_risk,dim=-1).mean()
+        # smoothed distance loss
+        diffXd = torch.norm(
+            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
         prob = torch.softmax(-torch.mean(gt_risk[..., 10:],dim=-1), dim=1)
         dis_prob = torch.softmax(-torch.mean(diffXd[..., 10:],dim=-1), dim=1)
         cls_loss = self.crossE(prob, dis_prob)
@@ -583,3 +594,17 @@ def cost_function_sample(control_variables, current_state, predictions, ref_line
         'safety':_safety([control_variables],[predictions, current_state, ref_line]).unsqueeze(-1),
         }
     return cost
+
+
+def risk_cost_function_sample(control_variables, current_state, predictions, ref_line, vf_map):
+    _control_variables = TmpContainer(control_variables['u'])
+    _current_state = TmpContainer(current_state)
+    _predictions = TmpContainer(predictions)
+    _ref_line = TmpContainer(ref_line)
+    measure = {
+        'lane_xy':_lane_xy([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'lane_theta':_lane_theta([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'safety':_safety([_control_variables],[_predictions, _current_state, _ref_line]).unsqueeze(-1),
+        'vf_map':vf_map.vector_field_diff(control_variables['X'])
+        }
+    return measure

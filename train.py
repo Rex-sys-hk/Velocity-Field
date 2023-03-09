@@ -149,8 +149,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                         plt.plot(traj[...,0],traj[...,1],'r',lw=0.5)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-                    vf_map.plot(planner.sample_plan['X'][0:1])
-                    vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
+                    with torch.no_grad():
+                        vf_map.plot(planner.sample_plan['X'])
+                        vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
             ## general output
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), lw=1, label='reflane')
             plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=1,label='plan result')

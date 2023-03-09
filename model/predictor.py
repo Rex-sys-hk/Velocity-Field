@@ -1,4 +1,5 @@
 from cProfile import label
+from turtle import color
 from sklearn.preprocessing import scale
 import torch
 from torch import int64, long, nn
@@ -214,16 +215,42 @@ class Score(nn.Module):
         scores = self.decode(feature).squeeze(-1)
 
         return scores
-# class VectorField(nn.Module):
-#     def __init__(self):
-#         super(VectorField, self).__init__()
-class VectorField():
+    
+class VFMapDecoder(nn.Module):
     def __init__(self) -> None:
+        super(VFMapDecoder, self).__init__()
+        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(),nn.Dropout(0.1),nn.Linear(32, 64))
+        self.cross_attention = nn.MultiheadAttention(64, 2, 0.1, batch_first=True)
+        self.transformer = nn.Sequential(nn.LayerNorm(64), nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
+        self._map_feature = None
+        self._masks = None
+        
+    def set_latent_feature(self, map_feature, masks):
+        self._map_feature = map_feature[:,0]
+        self._masks = masks[:,0]
+
+    def forward(self, sample):
+        # cross attention of self.grid and map_feature
+        query = self.emb(sample)
+        map_feature = self.map_feat_emb(self._map_feature)
+        x,_ = self.cross_attention(query,
+                                   map_feature,
+                                   map_feature,
+                                   key_padding_mask = self._masks
+                                   )
+        dx_dy = self.transformer(x)
+        return dx_dy
+
+class VectorField(nn.Module):
+    def __init__(self) -> None:
+        super(VectorField, self).__init__()
+        self.vf_inquery = VFMapDecoder()
         self.rear_range = 10.
-        self.front_range = 140.
-        self.side_range = 60.
-        self.steps_s = int(150)
-        self.steps_l = int(120)
+        self.front_range = 90.
+        self.side_range = 30.
+        self.steps_s = int(100)
+        self.steps_l = int(60)
         self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
         self.resolution_l = 2*self.side_range/self.steps_l
         # make grid
@@ -231,32 +258,18 @@ class VectorField():
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
         x,y = torch.meshgrid(s,l,indexing='xy')
         self.grid_points = torch.stack([x,y],dim=-1).reshape(1, -1, 2)
-        self.dx_dy = None
-
-    def metric2index(self, s, l):
-        idx_s = torch.floor((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)
-        idx_l = torch.floor((l+self.side_range)/self.resolution_l).clip(0,self.steps_l-1)
-        idx = idx_s+idx_l*self.steps_s
-        return idx.to(dtype=long).clip(0,self.steps_s*self.steps_l-1)
     
-    def get_yaw_v(self,dx_dy):
-        self.dx_dy = dx_dy #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
-
-    def get_yaw_v_by_pos(self,samples):
-        btsz, sample, th, dim = samples.shape
-        idx = self.metric2index(samples[...,0].reshape(btsz,-1), samples[...,1].reshape(btsz, -1))
-        dx_dy = torch.stack([self.dx_dy[i,m] for i,m in enumerate(idx)],dim=0)
-        return dx_dy.view(btsz, sample, th, 2)
-    
-    def plot(self, samples = None):
-        if samples != None:
-            btsz, sample, th, dim = samples.shape
-            idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1))
-            xy = torch.stack([self.grid_points[0,m.cpu()] for i,m in enumerate(idx)],dim=0)
-            plt.scatter(xy[...,0].cpu().detach(),
-                        xy[...,1].cpu().detach(),
-                        label='Visited Grid')
-        dx_dy = self.dx_dy[0].reshape(self.steps_s,self.steps_l,-1)
+    def plot(self, samples):
+        b,s,t,d = samples.shape
+        sample_dx_dy = self.vf_inquery(samples.view(b,-1,d)[...,:2])#.reshape(b,s,t,2)
+        plt.quiver(samples.reshape(b,-1,d)[0,...,0].cpu().detach(), 
+            samples.reshape(b,-1,d)[0,...,1].cpu().detach(),
+            sample_dx_dy[0,...,0].cpu().detach(),
+            sample_dx_dy[0,...,1].cpu().detach(),
+            label='Vector Field',
+            color='yellow')
+        
+        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
                    dx_dy[...,0].cpu().detach(),
@@ -283,62 +296,43 @@ class VectorField():
             color = 'green',
             label='GT Vector')
         
-    def get_loss(self, gt, sample = None):
+    def get_loss(self, gt, sample):
         # convert to vx,vy
         loss = 0
-        dx_dy = self.get_yaw_v_by_pos(gt)
-        loss += torch.nn.functional.smooth_l1_loss(dx_dy, gt[...,3:5])
-        loss += 1e-3*torch.norm(self.dx_dy,dim=-1).mean()
-        if sample != None:
-            diff_sample_gt = 0
-            dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
-                                            sample[...,:-1,:2]],
-                                            dim=-2)
-            d_dis_diff = dis_diff/0.1 #Time interval
-            diff_sample_gt+=d_dis_diff
-            sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
-                                      torch.sin(sample[...,2])*sample[...,3]],
-                                      dim=-1)
-            diff_sample_gt += gt[...,3:5] - sample_dxy
-            dx_dy = self.get_yaw_v_by_pos(sample[...,:2])
-            loss += torch.nn.functional.smooth_l1_loss(dx_dy, diff_sample_gt)
+        # get dx_dy
+        query = torch.cat([gt[...,:2],sample[...,:2]],dim=1)
+        b,s,t,d = query.shape
+        dx_dy = self.vf_inquery(query.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
+        dx_dy_gt = dx_dy[:,0:1]
+        dx_dy_samp = dx_dy[:,1:]
+        dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
+        
+        # imitation loss
+        loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5])
+        # regularization 
+        loss += 1e-3*torch.norm(dx_dy_grid,dim=-1).mean()
+        # construct field direction
+        diff_sample_gt = 0
+        dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
+                                        sample[...,:-1,:2]],
+                                        dim=-2)
+        d_dis_diff = dis_diff/0.1 #Time interval
+        diff_sample_gt+=d_dis_diff
+        sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
+                                    torch.sin(sample[...,2])*sample[...,3]],
+                                    dim=-1)
+        diff_sample_gt += gt[...,3:5] - sample_dxy
+        loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_samp, diff_sample_gt)
         return loss
     
     def vector_field_diff(self, traj):
-        dx_dy = self.get_yaw_v_by_pos(traj)
+        b,s,t,d = traj.shape
+        dx_dy = self.vf_inquery(traj.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
         traj_xy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
                             torch.sin(traj[...,2])*traj[...,3]],
                             dim=-1)
         diff = traj_xy - dx_dy
         return diff
-
-class VFMapDecoder(nn.Module):
-    def __init__(self) -> None:
-        super(VFMapDecoder, self).__init__()
-        self.vf = VectorField()
-        self.grid_points = self.vf.grid_points
-        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
-        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(),nn.Dropout(0.1),nn.Linear(32, 64))
-        self.cross_attention = nn.MultiheadAttention(64, 2, 0.1, batch_first=True)
-        self.transformer = nn.Sequential(nn.LayerNorm(64), nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
-
-    def forward(self, map_feature, masks):
-        # cross attention of self.grid and map_feature
-        # Q grid points
-        # K,V map_feature
-        btsz = map_feature.shape[0]
-        self.grid_points = self.grid_points.to(map_feature.device)
-        grid = self.grid_points.repeat(btsz,1,1)
-        query = self.emb(grid)
-        map_feature = self.map_feat_emb(map_feature[:,0])
-        x,_ = self.cross_attention(query,
-                                   map_feature,
-                                   map_feature,
-                                   key_padding_mask = masks[:,0]
-                                   )
-        yaw_v = self.transformer(x)
-        self.vf.get_yaw_v(yaw_v)
-        return self.vf
     
 # Build predictor
 class BasePre(nn.Module):
@@ -511,7 +505,7 @@ class RiskMapPre(nn.Module):
         self.score = Score()
 
         self.meter2risk: Meter2Risk = CostModules[cfg['planner']['meter2risk']['name']]()
-        self.vf_map_decoder = VFMapDecoder()
+        self.vf_map = VectorField()
 
     def forward(self, ego, neighbors, map_lanes, map_crosswalks):
         # actors
@@ -553,7 +547,7 @@ class RiskMapPre(nn.Module):
         # to be compatible with risk map
         latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
         self.meter2risk.set_latent_feature(latent_feature)
-        self.vf_map = self.vf_map_decoder(map_feature,map_mask)
+        self.vf_map.vf_inquery.set_latent_feature(map_feature,map_mask)
         
         return plans, predictions, scores, cost_function_weights
     
