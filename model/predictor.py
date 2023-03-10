@@ -312,17 +312,17 @@ class VectorField(nn.Module):
         # regularization 
         loss += 1e-3*torch.norm(dx_dy_grid,dim=-1).mean()
         # construct field direction
-        diff_sample_gt = 0
-        dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
-                                        sample[...,:-1,:2]],
-                                        dim=-2)
-        d_dis_diff = dis_diff/0.1 #Time interval
-        diff_sample_gt+=d_dis_diff
-        sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
-                                    torch.sin(sample[...,2])*sample[...,3]],
-                                    dim=-1)
-        diff_sample_gt += gt[...,3:5] - sample_dxy
-        loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_samp, diff_sample_gt)
+        # diff_sample_gt = 0
+        # dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
+        #                                 sample[...,:-1,:2]],
+        #                                 dim=-2)
+        # d_dis_diff = dis_diff/0.1 #Time interval
+        # diff_sample_gt+=d_dis_diff
+        # sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
+        #                             torch.sin(sample[...,2])*sample[...,3]],
+        #                             dim=-1)
+        # diff_sample_gt += gt[...,3:5] - sample_dxy
+        # loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_samp, diff_sample_gt)
         return loss
     
     def vector_field_diff(self, traj):
