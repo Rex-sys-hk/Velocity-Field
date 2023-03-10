@@ -81,67 +81,67 @@ def open_loop_test():
                 logging.info(f"Scenario: {scenario_id} Time: {timestep}")
                 
                 # prepare data
-                if not os.path.exists(f'{args.test_processed}/{scenario_id}_{timestep}.npz') or args.render:
-                    try:
-                        input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
-                    except:
-                        print(f'Scenario: {scenario_id} Time: {timestep} is not usable, skipped')
-                        continue
-                    ego = torch.from_numpy(input_data[0]).to(args.device)
-                    neighbors = torch.from_numpy(input_data[1]).to(args.device)
-                    lanes = torch.from_numpy(input_data[2]).to(args.device)
-                    crosswalks = torch.from_numpy(input_data[3]).to(args.device)
-                    ref_line = torch.from_numpy(input_data[4]).to(args.device)
-                    neighbor_ids, norm_gt_data, gt_data = input_data[5], input_data[6], input_data[7]
-                    current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-                    batch = []
-                    for i in range(5):
-                        batch.append(torch.from_numpy(input_data[i]))
-                else:
-                    data = np.load(f'{args.test_processed}/{scenario_id}_{timestep}.npz',allow_pickle=True)
-                    logging.info(f'Read data from {args.test_processed}/{scenario_id}_{timestep}.npz')
-                    ego = torch.from_numpy(data['ego']).unsqueeze(0)
-                    neighbors = torch.from_numpy(data['neighbors']).unsqueeze(0)
-                    ref_line = torch.from_numpy(data['ref_line'] ).unsqueeze(0)
-                    lanes = torch.from_numpy(data['map_lanes']).unsqueeze(0)
-                    crosswalks = torch.from_numpy(data['map_crosswalks']).unsqueeze(0)
-                    current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
-                    norm_gt_data = data['gt_future_states']
-                    batch = [ego,neighbors,lanes,crosswalks,ref_line]
+                # if not os.path.exists(f'{args.test_processed}/{scenario_id}_{timestep}.npz') or args.render:
+                # try:
+                input_data = processor.process_frame(timestep, sdc_id, parsed_data.tracks)
+                # except:
+                #     print(f'Scenario: {scenario_id} Time: {timestep} is not usable, skipped')
+                #     continue
+                ego = torch.from_numpy(input_data[0]).to(args.device)
+                neighbors = torch.from_numpy(input_data[1]).to(args.device)
+                lanes = torch.from_numpy(input_data[2]).to(args.device)
+                crosswalks = torch.from_numpy(input_data[3]).to(args.device)
+                ref_line = torch.from_numpy(input_data[4]).to(args.device)
+                neighbor_ids, norm_gt_data, gt_data = input_data[5], input_data[6], input_data[7]
+                current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+                batch = []
+                for i in range(5):
+                    batch.append(torch.from_numpy(input_data[i]))
+                # else:
+                #     data = np.load(f'{args.test_processed}/{scenario_id}_{timestep}.npz',allow_pickle=True)
+                #     logging.info(f'Read data from {args.test_processed}/{scenario_id}_{timestep}.npz')
+                #     ego = torch.from_numpy(data['ego']).unsqueeze(0)
+                #     neighbors = torch.from_numpy(data['neighbors']).unsqueeze(0)
+                #     ref_line = torch.from_numpy(data['ref_line'] ).unsqueeze(0)
+                #     lanes = torch.from_numpy(data['map_lanes']).unsqueeze(0)
+                #     crosswalks = torch.from_numpy(data['map_crosswalks']).unsqueeze(0)
+                #     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+                #     norm_gt_data = data['gt_future_states']
+                #     batch = [ego,neighbors,lanes,crosswalks,ref_line]
                 plan, prediction = inference(batch, predictor, planner, args, args.use_planning)
                 plan = plan.cpu().numpy()[0]
 
                 # compute metrics
-                logging.info(f"Results:")
-                collision = check_collision(plan, norm_gt_data[1:], current_state.cpu().numpy()[0, :, 5:])
-                collisions.append(collision)
-                traffic = check_traffic(plan, ref_line.cpu().numpy()[0])
-                red_light.append(traffic[0])
-                off_route.append(traffic[1])
-                logging.info(f"Collision: {collision}, Red light: {traffic[0]}, Off route: {traffic[1]}")
+                # logging.info(f"Results:")
+                # collision = check_collision(plan, norm_gt_data[1:], current_state.cpu().numpy()[0, :, 5:])
+                # collisions.append(collision)
+                # traffic = check_traffic(plan, ref_line.cpu().numpy()[0])
+                # red_light.append(traffic[0])
+                # off_route.append(traffic[1])
+                # logging.info(f"Collision: {collision}, Red light: {traffic[0]}, Off route: {traffic[1]}")
 
-                Acc, Jerk, Lat_Acc = check_dynamics(plan)
-                Accs.append(Acc)
-                Jerks.append(Jerk) 
-                Lat_Accs.append(Lat_Acc)
-                logging.info(f"Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
+                # Acc, Jerk, Lat_Acc = check_dynamics(plan)
+                # Accs.append(Acc)
+                # Jerks.append(Jerk) 
+                # Lat_Accs.append(Lat_Acc)
+                # logging.info(f"Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
 
-                Acc, Jerk, Lat_Acc = check_dynamics(norm_gt_data[0])
-                Human_Accs.append(Acc)
-                Human_Jerks.append(Jerk) 
-                Human_Lat_Accs.append(Lat_Acc)
-                logging.info(f"Human: Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
+                # Acc, Jerk, Lat_Acc = check_dynamics(norm_gt_data[0])
+                # Human_Accs.append(Acc)
+                # Human_Jerks.append(Jerk) 
+                # Human_Lat_Accs.append(Lat_Acc)
+                # logging.info(f"Human: Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
 
-                similarity = check_similarity(plan, norm_gt_data[0])
-                similarity_1s.append(similarity[9])
-                similarity_3s.append(similarity[29])
-                similarity_5s.append(similarity[49])
-                logging.info(f"Similarity@1s: {similarity[9]}, Similarity@3s: {similarity[29]}, Similarity@5s: {similarity[49]}")
+                # similarity = check_similarity(plan, norm_gt_data[0])
+                # similarity_1s.append(similarity[9])
+                # similarity_3s.append(similarity[29])
+                # similarity_5s.append(similarity[49])
+                # logging.info(f"Similarity@1s: {similarity[9]}, Similarity@3s: {similarity[29]}, Similarity@5s: {similarity[49]}")
 
-                prediction_error = check_prediction(prediction[0].cpu().numpy(), norm_gt_data[1:])
-                prediction_ADE.append(prediction_error[0])
-                prediction_FDE.append(prediction_error[1])
-                logging.info(f"Prediction ADE: {prediction_error[0]}, FDE: {prediction_error[1]}")
+                # prediction_error = check_prediction(prediction[0].cpu().numpy(), norm_gt_data[1:])
+                # prediction_ADE.append(prediction_error[0])
+                # prediction_FDE.append(prediction_error[1])
+                # logging.info(f"Prediction ADE: {prediction_error[0]}, FDE: {prediction_error[1]}")
 
                 ### plot scenario ###
                 if args.render:
@@ -217,15 +217,15 @@ def open_loop_test():
                     plt.clf()
 
     # save results
-    data = {'collision':collisions, 'red_light':red_light, 'off_route':off_route, 
-                            'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
-                            'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
-                            'Prediction_ADE':prediction_ADE, 'Prediction_FDE':prediction_FDE,
-                            'Human_L2_1s':similarity_1s, 'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s}
-    df = pd.DataFrame(data=data)
-    df.to_csv(f'./testing_log/{args.name}/testing_log.csv')
-    logging.info(f'file results saved in ./testing_log/{args.name}/testing_log.csv')
-    static_result(df, args.name)
+    # data = {'collision':collisions, 'red_light':red_light, 'off_route':off_route, 
+    #                         'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
+    #                         'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
+    #                         'Prediction_ADE':prediction_ADE, 'Prediction_FDE':prediction_FDE,
+    #                         'Human_L2_1s':similarity_1s, 'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s}
+    # df = pd.DataFrame(data=data)
+    # df.to_csv(f'./testing_log/{args.name}/testing_log.csv')
+    # logging.info(f'file results saved in ./testing_log/{args.name}/testing_log.csv')
+    # static_result(df, args.name)
 
 if __name__ == "__main__":
     # Arguments
