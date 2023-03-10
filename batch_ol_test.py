@@ -151,5 +151,8 @@ if __name__ == "__main__":
     cfg = load_cfg_here()
     logging.basicConfig()
     logging.getLogger().setLevel(logging.WARNING)
+    
+    log_dir=os.path.join(f'testing_log/{args.name}')
+    os.makedirs(log_dir,exist_ok=True)
 
     op_test()

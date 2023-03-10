@@ -266,7 +266,7 @@ class VectorField(nn.Module):
             samples.reshape(b,-1,d)[0,...,1].cpu().detach(),
             sample_dx_dy[0,...,0].cpu().detach(),
             sample_dx_dy[0,...,1].cpu().detach(),
-            label='Vector Field',
+            label='Sampled Vector Field',
             color='yellow')
         
         dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
