@@ -73,7 +73,8 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
 
             obs = simulator.reset()
             done = False
-
+            if type(obs) == type(None):
+                continue
             while not done:
                 logging.info(f'Time: {simulator.timestep-19}')
                 batch = []
