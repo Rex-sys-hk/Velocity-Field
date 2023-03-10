@@ -7,7 +7,7 @@ from utils.riskmap.utils import has_nan,load_cfg_here
 debug = False
 
 class Meter2Risk(nn.Module):
-    def __init__(self, device: str = 'cuda') -> None:
+    def __init__(self, device: str = 'cpu') -> None:
         super().__init__()
         ## define some common params here
         self.device = device
@@ -35,7 +35,7 @@ def get_pos_def_matrix(mat:torch.Tensor):
     return mat
 
 class UnifiedGaussianCost(Meter2Risk):
-    def __init__(self, device: str = 'cuda') -> None:
+    def __init__(self, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         th = th if self.TVC else 1
@@ -68,7 +68,7 @@ class UnifiedGaussianCost(Meter2Risk):
 
 
 class SimpleSignedRisk(Meter2Risk):
-    def __init__(self, TVC=False,V_dim=2, th=1, device: str = 'cuda') -> None:
+    def __init__(self, TVC=False,V_dim=2, th=1, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -101,7 +101,7 @@ class SimpleSignedRisk(Meter2Risk):
 
 
 class OriginalMeters(Meter2Risk):
-    def __init__(self, TVC = False, V_dim=7, th=1, device: str = 'cuda') -> None:
+    def __init__(self, TVC = False, V_dim=7, th=1, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         print("Using OriginalMeters, No training should be conducted")
@@ -115,7 +115,7 @@ class OriginalMeters(Meter2Risk):
 
 
 class SimpleWeights(Meter2Risk):
-    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cuda') -> None:
+    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         self.weights = nn.Parameter(torch.ones(th,V_dim,device=self.device))
@@ -135,7 +135,7 @@ class SimpleWeights(Meter2Risk):
         return reg+var
 
 class PositiveDeterministicWeights(Meter2Risk):
-    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cuda') -> None:
+    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -169,7 +169,7 @@ class PositiveDeterministicWeights(Meter2Risk):
 
 
 class CIOC(Meter2Risk):
-    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cuda') -> None:
+    def __init__(self,TVC=False ,V_dim=7, th=1, device: str = 'cpu') -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -241,7 +241,7 @@ class Enssemble(Meter2Risk):
 
 
 class DeepCost(Meter2Risk):
-    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cuda', idv = True) -> None:
+    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cpu', idv = True) -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -379,7 +379,7 @@ class DeepCost(Meter2Risk):
 
 
 class DeepMapOnly(Meter2Risk):
-    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cuda', idv = True) -> None:
+    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cpu', idv = True) -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -523,7 +523,7 @@ class DeepMapOnly(Meter2Risk):
 
 
 class DeepMapOnly_vv(Meter2Risk):
-    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cuda', idv= True) -> None:
+    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cpu', idv= True) -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -680,7 +680,7 @@ class DeepMapOnly_vv(Meter2Risk):
         return 0
 
 class LinearMap_vv(Meter2Risk):
-    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cuda', idv = True) -> None:
+    def __init__(self, TVC=False ,V_dim=8, th=1, device: str = 'cpu', idv = True) -> None:
         super().__init__()
         self.device = device
         th = th if TVC else 1
@@ -833,7 +833,7 @@ class LinearMap_vv(Meter2Risk):
         return 0
     
 class SimpleCostCoef(Meter2Risk):
-    def __init__(self, device: str = 'cuda') -> None:
+    def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
         self.th = 50
         self.map_elements = 9
@@ -855,7 +855,7 @@ class SimpleCostCoef(Meter2Risk):
         return coeff*raw_meters
     
 class CostModelTV(Meter2Risk):
-    def __init__(self, device: str = 'cuda') -> None:
+    def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
         self.coeff = nn.Sequential(
                         nn.Linear(self.th*self.V_dim,128),
@@ -872,7 +872,7 @@ class CostModelTV(Meter2Risk):
         return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
     
 class CostModel(Meter2Risk):
-    def __init__(self, device: str = 'cuda') -> None:
+    def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
         self.coeff = nn.Sequential(
                         nn.Linear(1*self.V_dim,128),

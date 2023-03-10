@@ -56,7 +56,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.device)
         if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
     else:
         planner = None
     for i,file in enumerate(files[test_pkg_sid: test_pkg_eid]):
