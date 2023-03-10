@@ -13,6 +13,7 @@ start_train_test.sh
 start_cl_test.sh
 start_ol_test.sh
 start_data_process.sh
-visulize_ol.sh
 sync_tt_log.sh
 config.yaml
+start_ol_visulize.sh
+start_cl_test_bt.sh

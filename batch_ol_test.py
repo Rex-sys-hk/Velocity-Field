@@ -52,34 +52,34 @@ def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch,
         # logging.info(f"Results:")
         # TODO should be 0.01583
         collision = batch_check_collision(plan, norm_gt_data[:,1:], current_state[:, :, 5:])
-        collisions.append(collision.mean().cpu())
+        collisions.extend(collision.cpu())
 
         traffic = batch_check_traffic(plan, ref_line)
-        red_light.append(traffic[0].mean(dtype=float).cpu())
-        off_route.append(traffic[1].mean(dtype=float).cpu())
+        red_light.extend(traffic[0].cpu())
+        off_route.extend(traffic[1].cpu())
         # logging.info(f"Collision: {collision}, Red light: {traffic[0]}, Off route: {traffic[1]}")
 
         Acc, Jerk, Lat_Acc = batch_check_dynamics(plan)
-        Accs.append(Acc.mean().cpu())
-        Jerks.append(Jerk.mean().cpu()) 
-        Lat_Accs.append(Lat_Acc.mean().cpu())
+        Accs.extend(Acc.cpu())
+        Jerks.extend(Jerk.cpu()) 
+        Lat_Accs.extend(Lat_Acc.cpu())
         # logging.info(f"Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
 
         Acc, Jerk, Lat_Acc = batch_check_dynamics(norm_gt_data[:,0])
-        Human_Accs.append(Acc.mean().cpu())
-        Human_Jerks.append(Jerk.mean().cpu()) 
-        Human_Lat_Accs.append(Lat_Acc.mean().cpu())
+        Human_Accs.extend(Acc.cpu())
+        Human_Jerks.extend(Jerk.cpu()) 
+        Human_Lat_Accs.extend(Lat_Acc.cpu())
         # logging.info(f"Human: Acceleration: {Acc}, Jerk: {Jerk}, Lateral_Acceleration: {Lat_Acc}")
 
         similarity = batch_check_similarity(plan, norm_gt_data[:,0])
-        similarity_1s.append(similarity[:, 9].mean().cpu())
-        similarity_3s.append(similarity[:, 29].mean().cpu())
-        similarity_5s.append(similarity[:, 49].mean().cpu())
+        similarity_1s.extend(similarity[:, 9].cpu())
+        similarity_3s.extend(similarity[:, 29].cpu())
+        similarity_5s.extend(similarity[:, 49].cpu())
         # logging.info(f"Similarity@1s: {similarity[:,9].mean().cpu()}, Similarity@3s: {similarity[:,29].mean().cpu()}, Similarity@5s: {similarity[:,49].mean().cpu()}")
 
         prediction_error = batch_check_prediction(prediction, norm_gt_data[:,1:])
-        prediction_ADE.append(prediction_error[0].mean().cpu())
-        prediction_FDE.append(prediction_error[1].mean().cpu())
+        prediction_ADE.extend(prediction_error[0].cpu())
+        prediction_FDE.extend(prediction_error[1].cpu())
         # logging.info(f"Prediction ADE: {prediction_error[0]}, FDE: {prediction_error[1]}")
 
 

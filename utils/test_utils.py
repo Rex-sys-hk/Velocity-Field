@@ -333,7 +333,7 @@ def batch_check_dynamics(traj):
     acc = torch.diff(lon_speed,dim=-1) / 0.1
     jerk = torch.diff(lon_speed, dim=-1, n=2) / 0.01
     lat_acc = torch.diff(lat_speed, dim=-1) / 0.1
-    return torch.mean(torch.abs(acc)), torch.mean(torch.abs(jerk)), torch.mean(torch.abs(lat_acc))
+    return torch.mean(torch.abs(acc),dim=-1), torch.mean(torch.abs(jerk),dim=-1), torch.mean(torch.abs(lat_acc),dim=-1)
 
 def check_traffic(traj, ref_line):
     red_light = False
@@ -397,14 +397,16 @@ def check_prediction(trajs, gt):
 
 def batch_check_prediction(trajs, gt):
     weights = torch.ne(gt[:, :, :, :3], 0) # ne is not equal
+    masks = weights[:, :, 0, 0]
     prediction_trajectories = trajs * weights
     prediction_distance = torch.norm(prediction_trajectories[:, :, :, :2] - gt[:, :, :, :2], dim=-1)
-
     predictorADE = torch.mean(prediction_distance, dim=-1)
-    predictorADE = torch.masked_select(predictorADE, weights[:, :, 0, 0])
-    predictorADE = torch.mean(predictorADE)
+    # predictorADE = torch.masked_select(predictorADE, weights[:, :, 0, 0])
+    predictorADE = (predictorADE*(masks)).sum(dim=-1)/(masks.sum(dim=-1)).clamp(min=1)
+    # predictorADE = torch.mean(predictorADE, dim=-1)
     predictorFDE = prediction_distance[:, :, -1]
-    predictorFDE = torch.masked_select(predictorFDE, weights[:, :, 0, 0])
-    predictorFDE = torch.mean(predictorFDE)
+    # predictorFDE = torch.masked_select(predictorFDE, weights[:, :, 0, 0])
+    predictorFDE = (predictorFDE*(masks)).sum(dim=-1)/(masks.sum(dim=-1)).clamp(min=1)
+    # predictorFDE = torch.mean(predictorFDE, dim=-1)
 
     return predictorADE, predictorFDE
