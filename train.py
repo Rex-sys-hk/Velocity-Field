@@ -80,6 +80,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
             u, prediction = select_future(plans, predictions, best_mode)
+            loss += 1e-1*torch.norm(u,dim=-1).mean()
             u = torch.cat([u[...,0:1].clamp(-5,5),
                            pi_2_pi(u[...,1:2])
                            ],dim=-1)
@@ -91,7 +92,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state, # including neighbor cars
-                'init_guess_u': u,
+                'init_guess_u': u.detach().clone(),
             }
 
             plan,u = planner.plan(planner_inputs)
@@ -107,6 +108,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                             ],dim=-1)
             # guess loss
             init_guess = bicycle_model(u,ego[:, -1])
+            loss += 1e-1*torch.norm(u,dim=-1).mean()
             loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
             loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             planner_inputs = {
@@ -114,10 +116,10 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state,
                 "vf_map": vf_map,
-                'init_guess_u': u,
+                'init_guess_u': u.detach().clone(),
             }
             # plan loss
-            plan, u = planner.plan(planner_inputs) # control
+            plan, _ = planner.plan(planner_inputs) # control
             loss += planner.get_loss(ground_truth[...,0:1,:,:],
                                      tb_iters,
                                      tbwriter)
