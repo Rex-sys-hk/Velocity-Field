@@ -219,10 +219,10 @@ class Score(nn.Module):
 class VFMapDecoder(nn.Module):
     def __init__(self) -> None:
         super(VFMapDecoder, self).__init__()
-        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
-        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(),nn.Dropout(0.1),nn.Linear(32, 64))
-        self.cross_attention = nn.MultiheadAttention(64, 2, 0.1, batch_first=True)
-        self.transformer = nn.Sequential(nn.LayerNorm(64), nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
+        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
+        self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
+        self.transformer = nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
         self._map_feature = None
         self._masks = None
         
@@ -308,9 +308,10 @@ class VectorField(nn.Module):
         dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
         
         # imitation loss
-        loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5])
+        loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5])
         # regularization 
-        loss += 1e-3*torch.norm(dx_dy_grid,dim=-1).mean()
+        # loss += 1e-3*torch.norm(dx_dy_grid,dim=-1).mean()
+        loss += torch.nn.functional.smooth_l1_loss(dx_dy_grid, torch.zeros_like(dx_dy_grid))
         # construct field direction
         # diff_sample_gt = 0
         # dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 

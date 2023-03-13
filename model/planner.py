@@ -9,7 +9,7 @@ except:
 from utils.train_utils import bicycle_model, project_to_frenet_frame
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
-from utils.riskmap.utils import get_u_from_X, load_cfg_here
+from utils.riskmap.utils import get_u_from_X, load_cfg_here, yawv2yawdxdy
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
 class Planner:
@@ -75,18 +75,19 @@ class EularSamplingPlanner(Planner):
         self.device = device
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
         self.cost_function_weights = meter2risk
-        self.cov_base = 0.2
-        self.cov_inc = 1+1.2e-4
+        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_inc = torch.tensor([1+1.2e-4, 1+1.2e-4])
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
         try:
-            self.cov_base = self.cfg['cov_base']
-            self.cov_inc = 1+self.cfg['cov_inc']
+            self.cov_base = torch.tensor(self.cfg['cov_base'])
+            self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = 0.2, sample_num=100):
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
+        cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
         u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
@@ -140,8 +141,8 @@ class EularSamplingPlanner(Planner):
         loss = 0
         loss += 1e-3*torch.norm(cost,dim=-1).mean()
 
-        prob = torch.softmax(-torch.mean(cost[..., 10:],dim=-1), dim=1)
-        dis_prob = torch.softmax(-torch.mean(diffXd[..., 10:],dim=-1), dim=1)
+        prob = torch.softmax(torch.mean(cost[...],dim=-1), dim=1)
+        dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
         cls_loss = self.crossE(prob, dis_prob)
         loss += cls_loss
         if tb_writer:
@@ -160,19 +161,20 @@ class RiskMapPlanner(Planner):
         self.meter2risk = meter2risk
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
 
-        self.cov_base = 0.2
-        self.cov_inc = 1+1.2e-4
+        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_inc = torch.tensor([1+1.2e-4, 1+1.2e-4])
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
 
         try:
-            self.cov_base = self.cfg['cov_base']
-            self.cov_inc = 1+self.cfg['cov_inc']
+            self.cov_base = torch.tensor(self.cfg['cov_base'])
+            self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = 0.2, sample_num=100):
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
+        cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
         u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
@@ -235,8 +237,8 @@ class RiskMapPlanner(Planner):
         # smoothed distance loss
         diffXd = torch.norm(
             self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-        prob = torch.softmax(-torch.mean(gt_risk[...],dim=-1), dim=1)
-        dis_prob = torch.softmax(-torch.mean(diffXd[...],dim=-1), dim=1)
+        dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
+        prob = torch.softmax(torch.mean(gt_risk[...],dim=-1), dim=1)
         cls_loss = self.crossE(prob, dis_prob)
         loss += cls_loss
         if tb_writer:

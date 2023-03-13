@@ -728,6 +728,17 @@ def get_u_from_X(X, init_state):
     u = torch.stack([a,steering],dim=-1)
     return u
 
+def yawv2yawdxdy(X):
+    if X.shape[-1] != 4:
+        raise ValueError('X last dim should be [x, y, yaw, velocity]')
+    x = X[...,0:1]
+    y = X[...,1:2]
+    yaw = X[...,2:3]
+    v = X[...,3:4]
+    dx = v*torch.cos(yaw)
+    dy = v*torch.sin(yaw)
+    return torch.cat([x,y,yaw,dx,dy],dim=-1)
+
 # %% cost functions
 
 

@@ -80,10 +80,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
             u, prediction = select_future(plans, predictions, best_mode)
-            loss += 1e-1*torch.norm(u,dim=-1).mean()
-            u = torch.cat([u[...,0:1].clamp(-5,5),
-                           pi_2_pi(u[...,1:2])
-                           ],dim=-1)
+            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             init_guess = bicycle_model(u, ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[..., :3], ground_truth[:, 0, :, :3]) 
             loss += F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
@@ -102,13 +99,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
             u, prediction = select_future(plans, predictions, best_mode)
-            u = torch.cat([
-                            u[...,0:1].clamp(-5,5),
-                            pi_2_pi(u[...,1:2])
-                            ],dim=-1)
             # guess loss
+            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += 1e-1*torch.norm(u,dim=-1).mean()
             loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
             loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             planner_inputs = {
