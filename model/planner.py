@@ -87,7 +87,7 @@ class EularSamplingPlanner(Planner):
 
     def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
-        cov.to(context['init_guess_u'].device)
+        cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
         u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
