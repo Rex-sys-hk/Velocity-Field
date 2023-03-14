@@ -243,7 +243,7 @@ class RiskMapPlanner(Planner):
         label = torch.zeros_like(prob[:,0]).long()
         cls_loss = self.crossE(prob, label)
         loss += cls_loss
-        if tb_writer:
+        if tb_writer and prob.device==torch.device('cuda:0'):
             tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)
 
         return loss
