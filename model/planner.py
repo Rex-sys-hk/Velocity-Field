@@ -76,7 +76,7 @@ class EularSamplingPlanner(Planner):
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
         self.cost_function_weights = meter2risk
         self.cov_base = torch.tensor([0.5, 0.2])
-        self.cov_inc = torch.tensor([1+1.2e-4, 1+1.2e-4])
+        self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
         try:
@@ -159,10 +159,10 @@ class RiskMapPlanner(Planner):
             torch.tensor(self.cfg['risk_preference'], device=device), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
-        self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
+        self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
 
         self.cov_base = torch.tensor([0.5, 0.2])
-        self.cov_inc = torch.tensor([1+1.2e-4, 1+1.2e-4])
+        self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
 
@@ -235,11 +235,13 @@ class RiskMapPlanner(Planner):
         # regularization
         loss += 1e-3*torch.norm(gt_risk,dim=-1).mean()
         # smoothed distance loss
-        diffXd = torch.norm(
-            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-        dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
-        prob = torch.softmax(torch.mean(gt_risk[...],dim=-1), dim=1)
-        cls_loss = self.crossE(prob, dis_prob)
+        # diffXd = torch.norm(
+        #     self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+        # diffXd = torch.nn.functional.normalize(diffXd,dim=1)
+        # dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
+        prob = torch.softmax(torch.mean(-gt_risk[...],dim=-1), dim=1)
+        label = torch.zeros_like(prob[:,0]).long()
+        cls_loss = self.crossE(prob, label)
         loss += cls_loss
         if tb_writer:
             tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)

@@ -869,7 +869,9 @@ class CostModelTV(Meter2Risk):
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
-        return self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
+        risk = self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
+        risk = torch.nn.functional.normalize(risk,dim=1)
+        return risk
     
 class CostModel(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
