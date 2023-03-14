@@ -135,15 +135,17 @@ class EularSamplingPlanner(Planner):
                                     self.context['ref_line_info'], 
                                     )
         cost = self.cost_function_weights(cost)
-        diffXd = torch.norm(
-            self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-        cost = cost.mean(-1)
         loss = 0
+        # regularization
         loss += 1e-3*torch.norm(cost,dim=-1).mean()
-
-        prob = torch.softmax(torch.mean(cost[...],dim=-1), dim=1)
-        dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
-        cls_loss = self.crossE(prob, dis_prob)
+        # smoothed distance loss
+        # diffXd = torch.norm(
+        #     self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
+        # diffXd = torch.nn.functional.normalize(diffXd,dim=1)
+        # dis_prob = torch.softmax(torch.mean(diffXd[...],dim=-1), dim=1)
+        prob = torch.softmax(torch.mean(-cost[...],dim=-1), dim=1)
+        label = torch.zeros_like(prob[:,0]).long()
+        cls_loss = self.crossE(prob, label)
         loss += cls_loss
         if tb_writer:
             tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)
