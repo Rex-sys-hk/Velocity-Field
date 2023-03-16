@@ -230,9 +230,9 @@ class VFMapDecoder(nn.Module):
         self._map_feature = None
         self._masks = None
         
-    def set_latent_feature(self, map_feature, masks):
+    def set_latent_feature(self, map_feature):
         self._map_feature = map_feature[:,0]
-        self._masks = masks[:,0]
+        # self._masks = masks[:,0]
 
     def forward(self, sample):
         # cross attention of self.grid and map_feature
@@ -241,7 +241,7 @@ class VFMapDecoder(nn.Module):
         x,_ = self.cross_attention(query,
                                    map_feature,
                                    map_feature,
-                                   key_padding_mask = self._masks
+                                #    key_padding_mask = self._masks
                                    )
         dx_dy = self.transformer(x)
         return dx_dy
@@ -552,7 +552,7 @@ class RiskMapPre(nn.Module):
         # to be compatible with risk map
         latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
         self.meter2risk.set_latent_feature(latent_feature)
-        self.vf_map.vf_inquery.set_latent_feature(map_feature,map_mask)
+        self.vf_map.vf_inquery.set_latent_feature(map_feature)
         
         return plans, predictions, scores, cost_function_weights
     

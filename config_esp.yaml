@@ -20,3 +20,7 @@ planner:
     # input_shape: 256
     # TVC: False
     # idv: True
+  loss:
+    dis_prob: False
+    gt_label: False #not recomended
+    nmp_loss: True

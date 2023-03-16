@@ -22,5 +22,9 @@ planner:
   #   # input_shape: 256
   #   # idv: True
   #   # TVC: False
+  loss:
+    dis_prob: False
+    gt_label: False #not recomended
+    nmp_loss: True
   
   risk_preference: [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]
