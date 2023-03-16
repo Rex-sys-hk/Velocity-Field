@@ -1,0 +1,26 @@
+# console
+model_cfg:
+  name: 'nmp'
+  future_steps: 50
+  mode_num: 8
+  gamma: 1.
+
+planner: 
+  name: 'nmp'
+  cost_items: 3
+  time_horizon: 50 # same as future_steps
+
+  cov_base: [0.5, 0.2]
+  cov_inc: [0., 0.] #1.e-4
+  gt_sample_num: 30
+  plan_sample_num: 200
+
+  # meter2risk: 
+  #   name: 'CostModelTV'
+  #   V_dim: 8
+  #   th: 50
+  #   # input_shape: 256
+  #   # idv: True
+  #   # TVC: False
+  
+  risk_preference: [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]

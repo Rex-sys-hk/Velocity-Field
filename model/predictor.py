@@ -1,4 +1,8 @@
 from cProfile import label
+from cmath import sin
+from random import sample
+from string import printable
+from time import process_time_ns
 from turtle import color
 from sklearn.preprocessing import scale
 import torch
@@ -626,6 +630,199 @@ class EularPre(nn.Module):
         
         return plans, predictions, scores, cost_function_weights
 
+# %% cost volume
+class CostMapDecoder(nn.Module):
+    def __init__(self) -> None:
+        super(CostMapDecoder, self).__init__()
+        self.map_feat_emb = nn.Sequential(nn.Linear(256*9, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        self.emb = nn.Sequential(nn.Linear(6, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
+        self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
+        self.transformer = nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,1))
+        self._map_feature = None
+        self._agent_feature = None
+        self._masks = None
+        
+    def set_latent_feature(self, map_feature, agent_feature):
+        self._map_feature = map_feature
+        # self._masks = map_masks[:,0]
+        self._agent_feature = agent_feature
+        
+
+    def forward(self, sample):
+        # cross attention of self.grid and map_feature
+        query = self.emb(sample)
+        b,m,d = self._map_feature.shape
+        feature = torch.cat([self._map_feature.reshape(b,-1), self._agent_feature], dim=-1)
+        feature = self.map_feat_emb(feature)
+        x,_ = self.cross_attention(query,
+                                   feature.unsqueeze(1),
+                                   feature.unsqueeze(1),
+                                #    key_padding_mask = self._masks,
+                                   )
+        cost = self.transformer(x)
+        return cost
+
+class STCostMap(nn.Module):
+    def __init__(self, th = 50) -> None:
+        super(STCostMap, self).__init__()
+        self.th = th
+        self.real_t = 5.0
+        self.resolution_t = 0.1
+        self.rear_range = 70.4
+        self.front_range = 70.4
+        self.side_range = 40.
+        self.steps_s = int(50)
+        self.steps_l = int(25)
+        self.resolution_s = (self.front_range+self.rear_range)/self.steps_s
+        self.resolution_l = 2*self.side_range/self.steps_l
+        # make grid
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
+        t = torch.linspace(0.1, self.real_t, self.th) # 5.0 s-->50 steps
+        self.t = t
+        x,y,t = torch.meshgrid(s,l,t,indexing='xy')
+        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1).reshape(1, -1, 6)
+        self.cost_map = None
+        self.cost = CostMapDecoder()
+
+    def metric2index(self, s, l, t):
+        idx_s = torch.floor((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)
+        idx_l = torch.floor((l+self.side_range)/self.resolution_l).clip(0,self.steps_l-1)
+        idx_t = torch.floor((t-0.1)/self.resolution_t)
+        idx = idx_s+idx_l*self.steps_s+idx_t*self.steps_l*self.steps_s
+        return idx.to(dtype=long).clip(0,self.steps_s*self.steps_l-1)
+    
+    def get_cost(self, device):
+        self.cost_map = self.cost(self.grid_points.to(device))  #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
+
+    def get_cost_by_pos(self,samples):
+        btsz, sample, th, dim = samples.shape
+        t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        # grid map utils
+        # idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
+        # cost = torch.stack([self.cost_map[i,m] for i,m in enumerate(idx)],dim=0)
+        # inquiry utils
+        samples = samples.view(btsz,-1,dim)
+        query = [samples[...,0], samples[...,1], t, torch.sin(samples[...,0]), torch.sin(samples[...,1]), torch.sin(t)]
+        query = torch.stack(query, dim=-1)
+        cost = self.cost(query)
+        return cost.view(btsz, sample, th, 1)
+    
+    def plot(self, samples = None, interval = 5):
+        # if samples != None:
+        #     btsz, sample, th, dim = samples.shape
+        #     t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        #     idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
+        #     xy = torch.stack([self.grid_points[0,m.cpu()] for i,m in enumerate(idx)],dim=0)
+        #     plt.scatter(xy[...,0].cpu().detach(),
+        #                 xy[...,1].cpu().detach(),
+        #                 c = xy[...,2].cpu().detach(),
+        #                 label='Visited Grid')
+        # cost = self.cost_map[0].reshape(self.steps_s,self.steps_l,self.th,-1)
+        with torch.no_grad():
+            cost = self.cost(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        ax.scatter(self.grid_points[0,::interval,0].cpu().detach(), 
+                   self.grid_points[0,::interval,1].cpu().detach(),
+                   self.grid_points[0,::interval,2].cpu().detach(),
+                   c = cost.reshape(-1)[::interval].cpu().detach(),
+                   alpha=0.1,
+                   label='cost value')
+        
+    # def plot_gt(self, gt, samples):
+    #     diff_sample_gt = 0
+    #     dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(samples[...,0:1,:2],device=samples.device), 
+    #                                     samples[...,:-1,:2]],
+    #                                     dim=-2)
+    #     d_dis_diff = dis_diff/0.1 #Time interval
+    #     diff_sample_gt+=d_dis_diff
+    #     sample_cost = torch.stack([torch.cos(samples[...,2])*samples[...,3], 
+    #                               torch.sin(samples[...,2])*samples[...,3]],
+    #                               dim=-1)
+    #     # diff_sample_gt += gt[...,3:5] - sample_dxy
+    #     # plt.scatter(samples[0,...,0].cpu().detach(),
+    #     #     samples[0,...,1].cpu().detach())
+    #     plt.scatter3D(samples[0,...,0].cpu().detach(),
+    #         samples[0,...,1].cpu().detach(),
+    #         samples[0,...,2].cpu().detach(),
+    #         # diff_sample_gt[0,...,0].cpu().detach(),
+    #         # diff_sample_gt[0,...,1].cpu().detach(), 
+    #         c = sample_cost[...,0],
+    #         # color = 'green',
+    #         label='GT Vector')
+
+class CostVolume(nn.Module):
+    def __init__(self, name:str = 'nmp', future_steps = 50, mode_num = 3, gamma = 1.):
+        super(CostVolume, self).__init__()
+        self.name = 'nmp'
+        if self.name != name:
+            print('[WARNING]: Module name and config name different') 
+            print(f'set name is {name}')
+            print(f'module name is {self.name}')
+
+        self._future_steps = future_steps
+        cfg = load_cfg_here()
+        # agent layer
+        self.vehicle_net = AgentEncoder()
+        self.pedestrian_net = AgentEncoder()
+        self.cyclist_net = AgentEncoder()
+
+        # map layer
+        self.lane_net = LaneEncoder()
+        self.crosswalk_net = CrosswalkEncoder()
+        
+        # attention layers
+        self.agent_map = Agent2Map()
+        self.agent_agent = Agent2Agent()
+
+        # decode layers
+        self.plan = AVDecoder(self._future_steps)
+        self.predict = AgentDecoder(self._future_steps)
+        self.score = Score()
+        
+        self.cost_volume = STCostMap(self._future_steps)
+        self.meter2risk: Meter2Risk = None#CostModules[cfg['planner']['meter2risk']['name']]()
+
+    def forward(self, ego, neighbors, map_lanes, map_crosswalks):
+        # actors
+        ego_actor = self.vehicle_net(ego)
+        vehicles = torch.stack([self.vehicle_net(neighbors[:, i]) for i in range(10)], dim=1) 
+        pedestrians = torch.stack([self.pedestrian_net(neighbors[:, i]) for i in range(10)], dim=1) 
+        cyclists = torch.stack([self.cyclist_net(neighbors[:, i]) for i in range(10)], dim=1)
+        neighbor_actors = torch.where(neighbors[:, :, -1, -1].unsqueeze(2)==2, pedestrians, vehicles)
+        neighbor_actors = torch.where(neighbors[:, :, -1, -1].unsqueeze(2)==3, cyclists, neighbor_actors)
+        actors = torch.cat([ego_actor.unsqueeze(1), neighbor_actors], dim=1)
+        actor_mask = torch.eq(torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1), 0)[:, :, -1, -1]
+
+        # maps
+        lane_feature = self.lane_net(map_lanes)
+        crosswalk_feature = self.crosswalk_net(map_crosswalks)
+        lane_mask = torch.eq(map_lanes, 0)[:, :, :, 0, 0]
+        crosswalk_mask = torch.eq(map_crosswalks, 0)[:, :, :, 0, 0]
+        map_mask = torch.cat([lane_mask, crosswalk_mask], dim=2)
+        map_mask[:, :, 0] = False # prevent nan
+        
+        # actor to actor
+        agent_agent = self.agent_agent(actors, actor_mask)
+        
+        # map to actor
+        map_feature = []
+        agent_map = []
+        for i in range(actors.shape[1]):
+            output = self.agent_map(agent_agent[:, i], lane_feature[:, i], crosswalk_feature[:, i], map_mask[:, i])
+            map_feature.append(output[0])
+            agent_map.append(output[1])
+
+        map_feature = torch.stack(map_feature, dim=1)
+        agent_map = torch.stack(agent_map, dim=2)
+
+        # plan + prediction 
+        plans, _ = self.plan(agent_map[:, :, 0], agent_agent[:, 0])
+        predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
+        scores = self.score(map_feature, agent_agent, agent_map)
+        self.cost_volume.cost.set_latent_feature(agent_map[:, :, 0], agent_agent[:, 0])
+        return plans, predictions, scores, self.cost_volume
 
 if __name__ == "__main__":
     # set up model

@@ -14,8 +14,8 @@ from torch import nn, optim
 from common_utils import inference, load_checkpoint, save_checkpoint, predictor_selection
 from utils.train_utils import *
 from utils.riskmap.utils import get_u_from_X, has_nan, load_cfg_here
-from model.planner import BasePlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
-from model.predictor import Predictor, VectorField
+from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
+from model.predictor import CostVolume, Predictor, STCostMap, VectorField
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -54,6 +54,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # plan
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
+        ## DEPRECATED
         elif planner.name=='dipp':
             planner: MotionPlanner = planner
             u, prediction = select_future(plans, predictions, best_mode)
@@ -76,7 +77,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
-
+        ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
             u, prediction = select_future(plans, predictions, best_mode)
@@ -94,7 +95,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
 
             plan,u = planner.plan(planner_inputs)
             loss += planner.get_loss(ground_truth[...,0:1,:,:], tb_iter=tb_iters, tb_writer=tbwriter)
-
+        ## RISK
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
@@ -118,14 +119,35 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
             loss += vf_map.get_loss(ground_truth[...,0:1,:,:], 
                                     planner.gt_sample['X'])
-            
+        ## BASELINE
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
             plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
             loss += plan_loss
-
+        ## Neural Motion Planner
+        elif planner.name=='nmp':
+            planner:CostMapPlanner = planner
+            cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
+            u, prediction = select_future(plans, predictions, best_mode)
+            # guess loss
+            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            init_guess = bicycle_model(u,ego[:, -1])
+            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
+            loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            planner_inputs = {
+                "predictions": prediction, # prediction for surrounding vehicles 
+                "ref_line_info": ref_line_info,
+                "current_state": current_state,
+                "cost_map": cost_map,
+                'init_guess_u': u.detach().clone(),
+            }
+            # plan loss
+            plan, _ = planner.plan(planner_inputs) # control
+            loss += planner.get_loss(ground_truth[...,0:1,:,:],
+                                     tb_iters,
+                                     tbwriter)
         # loss backward
         loss.backward()
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)
@@ -137,19 +159,30 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.autoscale(False)
             ## special output
             if use_planning:
-                if planner.name in ['risk','esp']:
+                if planner.name in ['risk','esp','nmp']:
                     for traj in planner.gt_sample['X'][0].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'g',lw=0.5)
+                        plt.plot(traj[...,0],traj[...,1],'g',lw=0.2)
                     for traj in planner.sample_plan['X'][0].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'r',lw=0.5)
+                        plt.plot(traj[...,0],traj[...,1],'r',lw=0.2)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():
                         vf_map.plot(planner.sample_plan['X'])
                         vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
+                if planner.name in ['nmp']:
+                    cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
+                    cost_map.plot(planner.sample_plan['X'])
+                else:
+                    plt.axis('equal')
+            else:
+                plt.axis('equal')
+                
             ## general output
+            # reference lane
             plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), lw=1, label='reflane')
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=1,label='plan result')
+            # result
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=2,label='plan result')
+            # ground truth
             plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=1,label='GT')
             for mod in plan_trajs[0].cpu().detach():
                 plt.plot(mod[...,0], mod[...,1],'cyan',lw=0.5)
@@ -160,7 +193,6 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.xlim(-20,100)
             plt.ylim(-40,40)
             plt.legend()
-            plt.axis('equal')
             plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
             plt.close()
             plt.figure()
@@ -289,6 +321,8 @@ def model_training():
             planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.local_rank)
+        if cfg['planner']['name'] == 'nmp':
+            planner = CostMapPlanner(predictor.meter2risk, device=args.local_rank)
     else:
         planner = None
 

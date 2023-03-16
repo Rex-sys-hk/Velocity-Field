@@ -7,21 +7,23 @@ FilePath: /DIPP/common_utils.py
 Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 '''
 import torch
-from model.predictor import BasePre, EularPre, Predictor, RiskMapPre
-from model.planner import BasePlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
+from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre, STCostMap
+from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
 from utils.riskmap.car import pi_2_pi
 from utils.train_utils import bicycle_model, select_future
 predictor_selection = {'base': BasePre,
                        'dipp': Predictor,
                        'risk': RiskMapPre,
                        'esp': EularPre,
+                       'nmp': CostVolume,
                        }
 
 
 planner_selection = {'base': BasePlanner,
                      'dipp': MotionPlanner,
                      'risk': RiskMapPlanner,
-                     'esp':EularSamplingPlanner,
+                     'esp': EularSamplingPlanner,
+                     'nmp': CostMapPlanner,
                      }
 
 def save_checkpoint(epoch, save_name, cfg, model, lr=1e-4, dist=False):
@@ -126,5 +128,20 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False):
     elif planner.name=='base':
         plan, prediction = select_future(plans, predictions, scores)
         plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+    elif planner.name=='nmp':
+        planner:CostMapPlanner = planner
+        cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
+        u, prediction = select_future(plans, predictions, scores)
+        # guess loss
+        planner_inputs = {
+            "predictions": prediction, # prediction for surrounding vehicles 
+            "ref_line_info": ref_line_info,
+            "current_state": current_state,
+            "cost_map": cost_map,
+            'init_guess_u': u.detach().clone(),
+        }
+        # plan loss
+        with torch.no_grad():
+            plan, _ = planner.plan(planner_inputs) # control
 
     return plan, prediction

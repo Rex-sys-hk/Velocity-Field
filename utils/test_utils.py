@@ -1,5 +1,6 @@
 import logging
 from multiprocessing.resource_sharer import stop
+from tkinter.tix import S_REGION
 import torch
 import matplotlib.pyplot as plt
 import scipy.spatial as T
@@ -296,6 +297,24 @@ def batch_check_collision(ego_center_points, neighbor_center_points, sizes):
     collision = torch.where(dis.amin(dim=1)<=0, 1., 0.).amax(dim=-1)
     return collision 
 
+def batch_sample_check_collision(ego_center_points, neighbor_center_points, sizes):
+    # collision = False
+    plan_x, plan_y, plan_yaw, plan_l, plan_w = ego_center_points[...,0], ego_center_points[...,1], ego_center_points[...,2], sizes[..., 0, 0], sizes[..., 0, 1]
+    ego_vehicle = batch_return_circle_list(plan_x, plan_y, plan_l.unsqueeze(1), plan_w.unsqueeze(1), plan_yaw)
+    pre_x, pre_y, pre_yaw, pre_l, pre_w = neighbor_center_points[...,0], neighbor_center_points[...,1], neighbor_center_points[...,2], sizes[..., 1:, 0], sizes[..., 1:, 1]
+    neighbor_vehicle = batch_return_circle_list(pre_x, pre_y, pre_l, pre_w, pre_yaw)
+    masks = torch.ne(neighbor_center_points[...,0], 0).unsqueeze(1)
+    b,s,t,c,d = ego_vehicle.shape
+    nb,nn,nt,nc,nd = neighbor_vehicle.shape
+    _ego_vehicle = ego_vehicle.reshape(b,s,1,t,c,1,d)
+    _neighbor_vehicle = neighbor_vehicle.reshape(nb,1,nn,nt,1,nc,nd)
+    dis = _ego_vehicle[...,:2] -_neighbor_vehicle[...,:2]
+    dis = torch.norm(dis,dim=-1) - _ego_vehicle[...,2] -_neighbor_vehicle[...,2]
+    dis = dis.amin(dim = [-1,-2])
+    dis = dis + torch.nan_to_num((~masks)*torch.inf,nan=0)
+    collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).amax(dim=-1)
+    return collision 
+
 def check_collision_step(ego_center_points, neighbor_center_points, sizes):
     collision = []
     plan_x, plan_y, plan_yaw, plan_l, plan_w = ego_center_points[0], ego_center_points[1], ego_center_points[2], sizes[0, 0], sizes[0, 1]
@@ -367,6 +386,23 @@ def batch_check_traffic(traj, ref_line):
     stop_point = torch.ones_like(s_ego, device=s_ego.device)*torch.inf
     for i, idx in enumerate(bt_id):
         stop_point[idx] = min(stop_point[idx],stop_point_id[i])
+
+    red_light = torch.where(s_ego>stop_point,1,0)
+    return red_light, off_route
+
+def batch_sample_check_traffic(traj, ref_line):
+    # project to frenet
+    distance_to_ref = traj[..., :2].unsqueeze(-2)-ref_line[..., :2].unsqueeze(1).unsqueeze(1)
+    distance_to_ref = torch.norm(distance_to_ref, dim=-1)
+    distance_to_route = torch.amin(distance_to_ref, dim=[-1])
+    off_route = torch.where(distance_to_route > 5, 1, 0).amax(dim=[-1])
+
+    # get stop point 
+    s_ego = torch.argmin(distance_to_ref, dim=-1).amax(dim=[-1])
+    bt_id, stop_point_id = torch.where(ref_line[:, :, -1]==0)
+    stop_point = torch.ones_like(s_ego, device=s_ego.device)*torch.inf
+    for i, idx in enumerate(bt_id):
+        stop_point[idx] = torch.min(stop_point[idx],stop_point_id[i])
 
     red_light = torch.where(s_ego>stop_point,1,0)
     return red_light, off_route

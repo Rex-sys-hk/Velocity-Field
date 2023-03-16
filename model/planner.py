@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 import torch
+from utils.test_utils import batch_check_collision, batch_check_traffic, batch_sample_check_collision, batch_sample_check_traffic
 try:
     import theseus as th
 except:
@@ -249,8 +250,83 @@ class RiskMapPlanner(Planner):
             tb_writer.add_scalar('loss/'+'loss_CE', cls_loss.mean(), tb_iter)
 
         return loss
-        # return loss.mean()
-        
+
+class CostMapPlanner(Planner):
+    def __init__(self, meter2risk: Meter2Risk, device, test=False) -> None:
+        super(CostMapPlanner, self).__init__(device, test)
+        self.name = 'nmp'
+        # self.lattice_planner = torchLatticePlanner(device, test=test)
+        self.hand_prefer = torch.softmax(
+            torch.tensor(self.cfg['risk_preference'], device=device), dim=0
+        )  # handcratfed preference
+        self.meter2risk = meter2risk
+        self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
+
+        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
+        self.gt_sample_num = self.cfg['gt_sample_num']
+        self.plan_sample_num = self.cfg['plan_sample_num']
+
+        try:
+            self.cov_base = torch.tensor(self.cfg['cov_base'])
+            self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
+        except:
+            logging.warning('cov_base amd conv_inc not define')
+
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
+        btsz = context['init_guess_u'].shape[0]
+        cov = cov.to(context['init_guess_u'].device)
+        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
+        init_guess_u=init_guess_u.unsqueeze(1)
+        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
+        cur_state = context['current_state'][:,0:1]
+        X = bicycle_model(u,cur_state)
+        u = torch.cat([init_guess_u,u],dim=1)
+        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
+        return {'X':X,'u':u}
+
+    def plan(self, context):
+        self.context = context
+        self.sample_plan = self.get_sample(context,sample_num=self.plan_sample_num)
+        self.risks = self.context['cost_map'].get_cost_by_pos(self.sample_plan['X'])
+        self.plan_result = self.selector(self.risks, self.sample_plan)
+        return self.plan_result
+
+    def selector(self, risks, sample_plan):
+        costs = risks*self.hand_prefer[:risks.shape[-1]]
+        i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
+        X,u = [],[]
+        sampleX = sample_plan['X']
+        sampleu = sample_plan['u']
+        for ii,m in enumerate(i.cpu()):
+            X.append(sampleX[ii,m])
+            u.append(sampleu[ii,m])
+        X = torch.stack(X,dim=0)
+        u = torch.stack(u,dim=0)
+        return X,u#torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
+
+    def get_loss(self, gt, tb_iter=0, tb_writer=None):
+        """
+        must be called after forward
+        """
+        loss = 0
+        u = get_u_from_X(gt,self.context['current_state'][:,0:1])
+        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+                                         cov=self.cov_base*(self.cov_inc**tb_iter), 
+                                         sample_num=self.gt_sample_num)
+        sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
+        gt_x = self.gt_sample['X'][:,0:1]
+        sample_x = self.gt_sample['X'][:,1:]
+        gt_cost = sample_costs[:,0:1]
+        sample_cost = sample_costs[:,1:]
+        collide = batch_sample_check_collision(sample_x,self.context['predictions'], self.context['current_state'][:, :, 5:])
+        tl, offroad = batch_sample_check_traffic(sample_x, self.context['ref_line_info'])
+        L = gt_cost-sample_cost+torch.norm(gt_x[...,:2]-sample_x[...,:2],dim=-1, keepdim=True)+torch.logical_or(collide, torch.logical_or(tl, offroad)).unsqueeze(-1).unsqueeze(-1)*1000
+        L = L.clamp(min=0, max=1000)
+        L = L.sum(dim=-1)
+        L = torch.amax(L,dim=-1)
+        loss += L.mean()
+        return loss
 
 
 
