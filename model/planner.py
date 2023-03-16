@@ -273,7 +273,9 @@ class RiskMapPlanner(Planner):
             sample_dxdy = dxdy[:,1:]
             collide = batch_sample_check_collision(sample_x,self.context['predictions'], self.context['current_state'][:, :, 5:])
             tl, offroad = batch_sample_check_traffic(sample_x, self.context['ref_line_info'])
-            L = torch.norm(gt_dxdy-sample_dxdy,dim=-1)+torch.norm(gt_x[...,:2]-sample_x[...,:2],dim=-1, keepdim=True)+torch.logical_or(collide, torch.logical_or(tl, offroad)).unsqueeze(-1).unsqueeze(-1)*1000
+            L = torch.norm(gt_dxdy-sample_dxdy,dim=-1, keepdim=True) \
+                +torch.norm(gt_x[...,:2]-sample_x[...,:2],dim=-1, keepdim=True) \
+                +torch.logical_or(collide, torch.logical_or(tl, offroad)).unsqueeze(-1).unsqueeze(-1)*1000
             L = L.clamp(min=0, max=1000)
             L = L.sum(dim=-1)
             L = torch.amax(L,dim=-1)
