@@ -777,7 +777,7 @@ class CostVolume(nn.Module):
         self.agent_agent = Agent2Agent()
 
         # decode layers
-        self.plan = AVDecoder(self._future_steps)
+        self.plan = AVDecoderNc(self._future_steps)
         self.predict = AgentDecoder(self._future_steps)
         self.score = Score()
         
