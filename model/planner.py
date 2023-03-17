@@ -78,11 +78,14 @@ class EularSamplingPlanner(Planner):
         self.cost_function_weights = meter2risk
         self.cov_base = torch.tensor([0.5, 0.2])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
+        self.turb_num = 50
+        
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
+            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
@@ -91,7 +94,7 @@ class EularSamplingPlanner(Planner):
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
+        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         u = torch.cat([init_guess_u,u],dim=1)
@@ -182,12 +185,15 @@ class RiskMapPlanner(Planner):
 
         self.cov_base = torch.tensor([0.5, 0.2])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
+        self.turb_num = 50
+        
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
 
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
+            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
@@ -196,7 +202,7 @@ class RiskMapPlanner(Planner):
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
+        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         u = torch.cat([init_guess_u,u],dim=1)
@@ -298,12 +304,15 @@ class CostMapPlanner(Planner):
 
         self.cov_base = torch.tensor([0.5, 0.2])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
+        self.turb_num = 50
+        
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
 
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
+            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
@@ -312,7 +321,7 @@ class CostMapPlanner(Planner):
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
         init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,50,2],device = init_guess_u.device)*cov+1.)*init_guess_u
+        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
         cur_state = context['current_state'][:,0:1]
         X = bicycle_model(u,cur_state)
         u = torch.cat([init_guess_u,u],dim=1)
