@@ -11,9 +11,11 @@ import shutil
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch import nn, optim
-from common_utils import inference, load_checkpoint, save_checkpoint, predictor_selection
+from common_utils import inference, init_planner, load_checkpoint, save_checkpoint, predictor_selection
+from utils.data_utils import DrivingData
+from utils.riskmap.car import bicycle_model
 from utils.train_utils import *
-from utils.riskmap.utils import get_u_from_X, has_nan, load_cfg_here
+from utils.riskmap.rm_utils import get_u_from_X, has_nan, load_cfg_here
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
 from model.predictor import CostVolume, Predictor, STCostMap, VectorField
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
@@ -311,20 +313,7 @@ def model_training():
 
     # %% initializing planner
     logging.info(f"Initialize planner {cfg['planner']['name']}")
-    if args.use_planning:
-        if cfg['planner']['name'] == 'dipp':
-            trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.local_rank)
-        if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.local_rank)
-        if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
-        if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.local_rank)
-        if cfg['planner']['name'] == 'nmp':
-            planner = CostMapPlanner(predictor.meter2risk, device=args.local_rank)
-    else:
-        planner = None
+    planner = init_planner(args, cfg, predictor)
 
     predictor = predictor.to(args.local_rank)
     # set up optimizer
@@ -339,7 +328,7 @@ def model_training():
     batch_size = args.batch_size
     
     # set up data loaders
-    train_set = DrivingData(args.train_set+'/*')
+    train_set = DrivingData(args.train_set+'/*',data_aug=True)
     valid_set = DrivingData(args.valid_set+'/*')
     if distributed:
         predictor = DDP(

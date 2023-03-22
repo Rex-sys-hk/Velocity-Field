@@ -76,35 +76,6 @@ def CTRV_model(agents):
 
     return prediction
 
-def physical_model(control, current_state, dt=0.1):
-    dt = 0.1 # discrete time period [s]
-    max_d_theta = 0.5 # vehicle's change of angle limits [rad/s]
-    max_a = 5 # vehicle's accleration limits [m/s^2]
-
-    x_0 = current_state[:, 0] # vehicle's x-coordinate
-    y_0 = current_state[:, 1] # vehicle's y-coordinate
-    theta_0 = current_state[:, 2] # vehicle's heading [rad]
-    v_0 = torch.hypot(current_state[:, 3], current_state[:, 4]) # vehicle's velocity [m/s]
-    a = control[:, :, 0].clip(-max_a, max_a) # vehicle's accleration [m/s^2]
-    d_theta = control[:, :, 1].clip(-max_d_theta, max_d_theta) # vehicle's heading change rate [rad/s]
-
-    # speed
-    v = v_0.unsqueeze(1) + torch.cumsum(a * dt, dim=1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    theta = theta_0.unsqueeze(1) + torch.cumsum(d_theta * dt, dim=-1)
-    theta = torch.fmod(theta, 2*torch.pi)
-    
-    # x and y coordniate
-    x = x_0.unsqueeze(1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj
-
 def map_process(map_feature, map_type):
     if map_type == 'lane':
         polyline = np.array([(map_point.x, map_point.y) for map_point in map_feature.polyline], dtype=np.float32)

@@ -19,7 +19,7 @@ planner:
   sdf_interpolating_factor: 1
   u_dim: 2
   default_v: 20 # m/s
-  cov_base: 0.2
+  cov_base: [0.1, 0.005]
   cov_inc: 1.e-4
   gt_sample_num: 150
   plan_sample_num: 200

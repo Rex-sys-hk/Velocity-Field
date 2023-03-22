@@ -6,11 +6,10 @@ import logging
 import pandas as pd
 import tensorflow as tf
 from statistic import static_result
-from utils.riskmap.utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here
 from utils.simulator import *
 from utils.test_utils import *
 from common_utils import *
-from model.planner import MotionPlanner
 from waymo_open_dataset.protos import scenario_pb2
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
@@ -39,24 +38,13 @@ def closed_loop_test():
     predictor.eval()
 
     # cache results
-    collisions, off_routes, progress = [], [], []
+    collisions, off_routes, traffic_light, progress = [], [], [], []
     Accs, Jerks, Lat_Accs = [], [], []
     Human_Accs, Human_Jerks, Human_Lat_Accs = [], [], []
     similarity_3s, similarity_5s, similarity_10s = [], [], []
 
     # set up planner
-    if args.use_planning:
-        if cfg['planner']['name'] == 'dipp':
-            trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
-        if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
-        if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.device)
-        if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
-    else:
-        planner = None
+    planner = init_planner(args, cfg, predictor)
     for i,file in enumerate(files[args.test_pkg_sid:args.test_pkg_num]):
         scenarios = tf.data.TFRecordDataset(file)
         logging.info(f'\n >>>[{i}/{len(files)}]:')
@@ -83,7 +71,7 @@ def closed_loop_test():
 
                 # take one step
                 obs, done, info = simulator.step(plan_traj, prediction)
-                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}')
+                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}, TL: {info[2]}')
 
                 # render
                 if args.render:
@@ -92,6 +80,7 @@ def closed_loop_test():
             # calculate metrics
             collisions.append(info[0])
             off_routes.append(info[1])
+            traffic_light.append(info[2])
             progress.append(simulator.calculate_progress())
 
             dynamics = simulator.calculate_dynamics()
@@ -119,7 +108,8 @@ def closed_loop_test():
                 simulator.save_animation(os.path.join(log_path,'video'))
 
     # save metircs
-    df = pd.DataFrame(data={'collision':collisions, 'off_route':off_routes, 'progress': progress,
+    df = pd.DataFrame(data={'collision':collisions, 'off_route':off_routes, 'traffic_light':traffic_light,
+                            'progress': progress,
                             'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
                             'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
                             'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s, 'Human_L2_10s':similarity_10s})

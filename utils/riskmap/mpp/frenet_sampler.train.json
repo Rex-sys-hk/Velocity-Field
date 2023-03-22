@@ -1,9 +1,9 @@
 {
-    "max_vel": 15,
-    "width": 2,
-    "num_lon_sample": 6,
-    "num_lat_sample": 3,
-    "max_deceleration": 6,
-    "max_acceleration": 4,
+    "max_vel": 20,
+    "width": 5,
+    "num_lon_sample": 20,
+    "num_lat_sample": 5,
+    "max_deceleration": -5,
+    "max_acceleration": 5,
     "max_curvature": 0.5773502691896255
 }

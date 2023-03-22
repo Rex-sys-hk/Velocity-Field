@@ -2,15 +2,16 @@ import logging
 import sys
 import os
 import torch
+from utils.riskmap.car import bicycle_model
 from utils.test_utils import batch_check_collision, batch_check_traffic, batch_sample_check_collision, batch_sample_check_traffic
 try:
     import theseus as th
 except:
     print('[WARNING] theseus is not implemented')
-from utils.train_utils import bicycle_model, project_to_frenet_frame
+from utils.train_utils import project_to_frenet_frame
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
-from utils.riskmap.utils import get_u_from_X, load_cfg_here, yawv2yawdxdy
+from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
 class Planner:
@@ -76,7 +77,7 @@ class EularSamplingPlanner(Planner):
         self.device = device
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
         self.cost_function_weights = meter2risk
-        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_base = torch.tensor([0.1, 0.005])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.turb_num = 50
         
@@ -85,11 +86,11 @@ class EularSamplingPlanner(Planner):
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
-            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
+            self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
@@ -183,7 +184,7 @@ class RiskMapPlanner(Planner):
         self.meter2risk = meter2risk
         self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
 
-        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_base = torch.tensor([0.1, 0.005])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.turb_num = 50
         
@@ -193,11 +194,11 @@ class RiskMapPlanner(Planner):
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
-            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
+            self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
@@ -302,7 +303,7 @@ class CostMapPlanner(Planner):
         self.meter2risk = meter2risk
         self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
 
-        self.cov_base = torch.tensor([0.5, 0.2])
+        self.cov_base = torch.tensor([0.1, 0.005])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.turb_num = 50
         
@@ -312,11 +313,11 @@ class CostMapPlanner(Planner):
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
-            self.turb_num = 1 if self.cfg['risk_preference']['const_turb'] else 50 
+            self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.5, 0.2]), sample_num=100):
+    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
         btsz = context['init_guess_u'].shape[0]
         cov = cov.to(context['init_guess_u'].device)
         init_guess_u = context['init_guess_u'] if gt_u==None else gt_u

@@ -1,12 +1,8 @@
-from distutils.log import error
 import torch
 import logging
-import glob
 import random
 import numpy as np
-from torch.utils.data import Dataset
 from torch.nn import functional as F
-import os
 
 from utils.riskmap.car import WB, pi_2_pi
 
@@ -23,38 +19,6 @@ def set_seed(CUR_SEED):
     torch.manual_seed(CUR_SEED)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-class DrivingData(Dataset):
-    def __init__(self, data_dir):
-        self.data_list = glob.glob(data_dir)
-
-    def __len__(self):
-        return len(self.data_list)
-
-    def __getitem__(self, idx):
-        try:
-            data = np.load(self.data_list[idx],allow_pickle=True)
-            if type(data) is str:
-                print(type(data))
-                print(os.path.isfile(data))
-                os.remove(data)
-                print("file %s as a pickle failed, removed" % repr(data))
-                print(os.path.isfile(data))
-                return self.__getitem__(idx+1)
-        except:
-            print(f'fail loading file {self.data_list[idx]}')
-            if os.path.exists(self.data_list[idx]):
-                print(f'removing file {self.data_list[idx]}')
-                os.remove(self.data_list[idx])
-            return self.__getitem__(idx+1)
-        ego = data['ego']
-        neighbors = data['neighbors']
-        ref_line = data['ref_line'] 
-        map_lanes = data['map_lanes']
-        map_crosswalks = data['map_crosswalks']
-        gt_future_states = data['gt_future_states']
-
-        return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
 
 def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
 
@@ -129,65 +93,3 @@ def project_to_cartesian_frame(traj, ref_line):
     xy = torch.stack([x, y], dim=-1)
 
     return xy
-
-def bicycle_model(control, current_state):
-    if len(control.shape)!=len(current_state.shape)+1:
-        logging.error('tensor dim inconsist')
-    dt = 0.1 # discrete time period [s]
-    max_delta = 0.6 # vehicle's steering limits [rad]
-    max_a = 5 # vehicle's accleration limits [m/s^2]
-    L = WB # vehicle's wheelbase [m]
-    x_0 = current_state[..., 0] # vehicle's x-coordinate [m]
-    y_0 = current_state[..., 1] # vehicle's y-coordinate [m]
-    theta_0 = current_state[..., 2] # vehicle's heading [rad]
-    v_0 = torch.hypot(current_state[..., 3], current_state[..., 4]) # vehicle's velocity [m/s]
-    a = control[..., 0].clamp(-max_a, max_a) # vehicle's accleration [m/s^2]
-    delta = pi_2_pi(control[..., 1]).clamp(-max_delta, max_delta) # vehicle's steering [rad]
-    # speed
-    v = v_0.unsqueeze(-1) + torch.cumsum(a * dt, dim=-1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    d_theta = v * torch.tan(delta) / L # use delta to approximate tan(delta)
-    theta = theta_0.unsqueeze(-1) + torch.cumsum(d_theta * dt, dim=-1)
-    # theta = torch.fmod(theta, 2*torch.pi)
-    theta = pi_2_pi(theta)
-    
-    # x and y coordniate
-    x = x_0.unsqueeze(-1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(-1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-    
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj
-
-def physical_model(control, current_state, dt=0.1):
-    # point with mass
-    dt = 0.1 # discrete time period [s]
-    max_d_theta = 0.5 # vehicle's change of angle limits [rad/s]
-    max_a = 5 # vehicle's accleration limits [m/s^2]
-
-    x_0 = current_state[:, 0] # vehicle's x-coordinate
-    y_0 = current_state[:, 1] # vehicle's y-coordinate
-    theta_0 = current_state[:, 2] # vehicle's heading [rad]
-    v_0 = torch.hypot(current_state[:, 3], current_state[:, 4]) # vehicle's velocity [m/s]
-    a = control[:, :, 0].clamp(-max_a, max_a) # vehicle's accleration [m/s^2]
-    d_theta = control[:, :, 1].clamp(-max_d_theta, max_d_theta) # vehicle's heading change rate [rad/s]
-
-    # speed
-    v = v_0.unsqueeze(1) + torch.cumsum(a * dt, dim=1)
-    v = torch.clamp(v, min=0)
-
-    # angle
-    theta = theta_0.unsqueeze(1) + torch.cumsum(d_theta * dt, dim=-1)
-    theta = torch.fmod(theta, 2*torch.pi)
-    
-    # x and y coordniate
-    x = x_0.unsqueeze(1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
-    y = y_0.unsqueeze(1) + torch.cumsum(v * torch.sin(theta) * dt, dim=-1)
-
-    # output trajectory
-    traj = torch.stack([x, y, theta, v], dim=-1)
-
-    return traj

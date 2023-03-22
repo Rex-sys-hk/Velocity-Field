@@ -6,14 +6,14 @@ import logging
 import pandas as pd
 import tensorflow as tf
 from statistic import static_result
-from utils.riskmap.utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here
 from utils.simulator import *
 from utils.test_utils import *
 from common_utils import *
-from model.planner import MotionPlanner
 from waymo_open_dataset.protos import scenario_pb2
 import ray
 import math
+import glob
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
@@ -41,24 +41,13 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
     predictor.eval()
 
     # cache results
-    collisions, off_routes, progress = [], [], []
+    collisions, off_routes, traffic_light, progress = [], [], [], []
     Accs, Jerks, Lat_Accs = [], [], []
     Human_Accs, Human_Jerks, Human_Lat_Accs = [], [], []
     similarity_3s, similarity_5s, similarity_10s = [], [], []
 
     # set up planner
-    if args.use_planning:
-        if cfg['planner']['name'] == 'dipp':
-            trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
-        if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
-        if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.device)
-        if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
-    else:
-        planner = None
+    planner = init_planner(args, cfg, predictor)
     for i,file in enumerate(files[test_pkg_sid: test_pkg_eid]):
         scenarios = tf.data.TFRecordDataset(file)
         logging.info(f'\n >>>[{i}/{len(files)}]:')
@@ -86,7 +75,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
 
                 # take one step
                 obs, done, info = simulator.step(plan_traj, prediction)
-                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}')
+                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}, traffic_light: {info[2]}')
 
                 # render
                 if args.render:
@@ -95,6 +84,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
             # calculate metrics
             collisions.append(info[0])
             off_routes.append(info[1])
+            traffic_light.append(info[2])
             progress.append(simulator.calculate_progress())
 
             dynamics = simulator.calculate_dynamics()
@@ -122,31 +112,16 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                 simulator.save_animation(os.path.join(log_path,'video'))
 
     # save metircs
-    data={'collision':collisions, 'off_route':off_routes, 'progress': progress,
-                            'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
-                            'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
-                            'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s, 'Human_L2_10s':similarity_10s}
+    data={'collision':collisions, 'off_route':off_routes, 'traffic_light':traffic_light,
+          'progress': progress,
+          'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
+          'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
+          'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s, 'Human_L2_10s':similarity_10s}
     df = pd.DataFrame(data=data)
     df.to_csv(f"./testing_log/{args.name}/testing_log_cl_{pid}.csv")
     # static_result(df, args.name, True)
     return data
 
-def cellect_results(results):
-    collisions, progress = [], []
-
-    red_light, off_routes = [], []
-    Accs, Jerks, Lat_Accs = [], [], []
-    Human_Accs, Human_Jerks, Human_Lat_Accs = [], [], []
-    similarity_3s, similarity_5s, similarity_10s = [], [], []
-    # prediction_ADE, prediction_FDE = [], []
-    data={'collision':collisions, 'off_route':off_routes, 'progress': progress,
-        'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
-        'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
-        'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s, 'Human_L2_10s':similarity_10s}
-    for d in results:
-        for k in d.keys():
-            data[k].extend(d[k])
-    return data
 
 if __name__ == "__main__":
     # Arguments

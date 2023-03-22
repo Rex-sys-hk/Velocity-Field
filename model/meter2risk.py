@@ -3,7 +3,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from utils.riskmap.utils import has_nan,load_cfg_here
+from utils.riskmap.rm_utils import has_nan, load_cfg_here
 debug = False
 
 class Meter2Risk(nn.Module):

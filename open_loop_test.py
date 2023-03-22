@@ -7,8 +7,7 @@ import logging
 import matplotlib.pyplot as plt
 import pandas as pd
 import tensorflow as tf
-from statistic import static_result
-from utils.riskmap.utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here
 from utils.test_utils import *
 from common_utils import *
 from model.planner import MotionPlanner
@@ -45,18 +44,7 @@ def open_loop_test():
     predictor.eval()
 
     # set up planner
-    if args.use_planning:
-        if cfg['planner']['name'] == 'dipp':
-            trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device=args.device)
-        if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device=args.device)
-        if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device=args.device)
-        if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
-    else:
-        planner = None
+    planner = init_planner(args, cfg, predictor)
 
     # iterate test files
     for i,file in enumerate(files[args.test_pkg_sid:args.test_pkg_num]):

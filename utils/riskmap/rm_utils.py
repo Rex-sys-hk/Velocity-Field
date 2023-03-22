@@ -12,10 +12,10 @@ import os
 import sys
 import math
 from torch import nn, true_divide
-from .car import WB
-from math import cos, sin, tan, pi
-from ..train_utils import bicycle_model
 
+from utils.train_utils import project_to_frenet_frame
+from .car import WB, bicycle_model
+from math import cos, sin, tan, pi
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # device = torch.device("cpu")
@@ -39,7 +39,8 @@ def correct_yaw(yaw: float) -> float:
     return yaw
 
 def pi_2_pi(angle):
-    return (angle + pi) % (2 * pi) - pi
+    # return (angle + pi) % (2 * pi) - pi
+    return (angle%(2*pi))
 
 def pi_2_pi_pos(angle):
     return (angle + 2*pi) % (2 * pi)
@@ -696,23 +697,23 @@ def load_cfg_here():
     return cfg
 
 
-def project_to_frenet_frame(traj, ref_line):
-    # distance_to_ref = torch.cdist(traj[..., :2], ref_line[..., :2])
-    # k = torch.argmin(distance_to_ref, dim=-1).view(-1, traj.shape[1], 1).expand(-1, -1, 3)
-    # ref_points = torch.gather(ref_line, 1, k)
-    # traj = bicycle_model(control, current_state)
-    btsz,mod,th,dim = traj.shape
-    distance_to_ref = torch.cdist(traj[..., :2].reshape(btsz,-1,2), ref_line[..., :2])
-    distance_to_ref = distance_to_ref.reshape(btsz,mod,th,-1)
-    k = torch.argmin(distance_to_ref, dim=-1).view(btsz,
-                                                   mod, th, 1).expand(-1, -1, -1, 3)
-    ref_points = torch.gather(ref_line.unsqueeze(-3).repeat(1,mod,1,1), 2, k)
-    x_r, y_r, theta_r = ref_points[..., 0], ref_points[..., 1], ref_points[..., 2] 
-    x, y = traj[..., 0], traj[..., 1]
-    s = 0.1 * (k[..., 0] - 200)
-    l = torch.sign((y-y_r)*torch.cos(theta_r)-(x-x_r)*torch.sin(theta_r)) * torch.sqrt(torch.square(x-x_r)+torch.square(y-y_r))
-    sl = torch.stack([s, l], dim=-1)
-    return sl
+# def project_to_frenet_frame(traj, ref_line):
+#     # distance_to_ref = torch.cdist(traj[..., :2], ref_line[..., :2])
+#     # k = torch.argmin(distance_to_ref, dim=-1).view(-1, traj.shape[1], 1).expand(-1, -1, 3)
+#     # ref_points = torch.gather(ref_line, 1, k)
+#     # traj = bicycle_model(control, current_state)
+#     btsz,mod,th,dim = traj.shape
+#     distance_to_ref = torch.cdist(traj[..., :2].reshape(btsz,-1,2), ref_line[..., :2])
+#     distance_to_ref = distance_to_ref.reshape(btsz,mod,th,-1)
+#     k = torch.argmin(distance_to_ref, dim=-1).view(btsz,
+#                                                    mod, th, 1).expand(-1, -1, -1, 3)
+#     ref_points = torch.gather(ref_line.unsqueeze(-3).repeat(1,mod,1,1), 2, k)
+#     x_r, y_r, theta_r = ref_points[..., 0], ref_points[..., 1], ref_points[..., 2] 
+#     x, y = traj[..., 0], traj[..., 1]
+#     s = 0.1 * (k[..., 0] - 200)
+#     l = torch.sign((y-y_r)*torch.cos(theta_r)-(x-x_r)*torch.sin(theta_r)) * torch.sqrt(torch.square(x-x_r)+torch.square(y-y_r))
+#     sl = torch.stack([s, l], dim=-1)
+#     return sl
 
 def get_u_from_X(X, init_state):
     L = WB
@@ -849,7 +850,6 @@ def neighbor_sl_dis(control, ref_line, current_state, neighbors):
     #     neighbors[:, :, i].detach(), ref_line) for i in range(neighbors.shape[2])], dim=2)
     frenet_neighbors = project_to_frenet_frame(neighbors,ref_line)
     frenet_ego = project_to_frenet_frame(ego.detach(), ref_line)
-
     # safe_error = []
     # for t in [0, 2, 5, 9, 14, 19, 24, 29, 39, 49]:  # key frames
         # find objects of interest

@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from data_process import DataProcess
+from utils.riskmap.car import pi_2_pi
 from utils.test_utils import *
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -55,7 +56,7 @@ class Simulator(DataProcess):
         
         # update sdc state
         velocity = (xy[0] - self.sdc_state[:2]) / 0.1
-        heading = plan[0, 2].clip(-0.1, 0.1) + self.sdc_state[2]
+        heading = pi_2_pi(plan[0, 2]) + self.sdc_state[2]
         self.sdc_state = np.concatenate([xy[0], [heading], velocity, self.sdc_state[-3:]])
         self.sdc_trajectory.append(self.sdc_state[:3])
         self.sdc_gt_trajectory.append(self.sdc_route[self.timestep])
@@ -81,9 +82,10 @@ class Simulator(DataProcess):
 
         # check
         collision = self.check_collision()
-        off_route = self.check_off_route()
+        # off_route = self.check_off_route()
+        red_light, off_route = self.check_traffic()
         done = collision or off_route or self.timestep > (self.timespan+19) or self.timestep >= len(self.timesteps)-1
-        info = (collision, off_route)
+        info = (collision, off_route, red_light)
 
         return obs, done, info
 
@@ -158,6 +160,10 @@ class Simulator(DataProcess):
             progress += np.hypot(dx, dy)
 
         return progress
+    
+    def check_traffic(self):
+        red_light, off_route = check_traffic(self.sdc_state[None, :2], self.ref_line)
+        return red_light, off_route
 
     def calculate_dynamics(self, traj=None):
         traj = traj if traj else self.sdc_trajectory

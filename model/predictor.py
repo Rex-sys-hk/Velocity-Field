@@ -8,7 +8,7 @@ from sklearn.preprocessing import scale
 import torch
 from torch import int64, long, nn
 import matplotlib.pyplot as plt
-from utils.riskmap.utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
 
 # Agent history encoder

@@ -1,23 +1,13 @@
-import sys
-import os
-# from opcode import hasname
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List
 import time
-
-from .utils import load_cfg_here#,bicycle_model
-from ..train_utils import bicycle_model
-
+from .rm_utils import load_cfg_here
 try:
     from .mpp.lib.frenet import FrenetSampler
 except:
-    # print('[WARNING] FrenetSampler is not implemented')
+    print('[WARNING] FrenetSampler is not implemented')
     pass
-
-from .utils import has_nan
-
 from .car import (move,
                   steering_to_yawrate,
                   rad_2_degree,
@@ -221,3 +211,92 @@ class torchLatticePlanner:
         # control = 
         # traj = bicycle_model(control, current_state)
         return traj, control
+    
+class LatticeSampler():
+    def __init__(self) -> None:
+        self.T = 5.0
+        self.Ts = np.linspace(0.1,5.0,50)
+        self.c_sampler = FrenetSampler('/mnt/c/Users/87649/Desktop/working_space/DIPP/utils/riskmap/mpp/frenet_sampler.train.json')
+        self.ref_length_lim = 80
+        
+    def sampling(self,
+                 ref_info: np.ndarray,
+                 x: float=0.,y: float=0.,yaw: float=0.,v: float=0.,acc: float=0.,
+                 ref_check = True
+                 ):
+        """
+        # template <typename T>
+        # Eigen::MatrixXd FrenetTrajectory<T>::ToNumpy() {
+        # const double init_s = traj_[0].s[0];
+        # Eigen::MatrixXd numpy(traj_.size(), kTrajFeatureDim);
+
+        # for (int i = 0; i < traj_.size(); ++i) {
+        #     numpy(i, 0) = traj_[i].pos[0];
+        #     numpy(i, 1) = traj_[i].pos[1];
+        #     numpy(i, 2) = std::cos(traj_[i].yaw);
+        #     numpy(i, 3) = std::sin(traj_[i].yaw);
+        #     numpy(i, 4) = traj_[i].s[0] - init_s;
+        #     numpy(i, 5) = traj_[i].s[1];
+        #     numpy(i, 6) = traj_[i].s[2];
+        #     numpy(i, 7) = traj_[i].d[0];
+        #     numpy(i, 8) = traj_[i].d[1];
+        #     numpy(i, 9) = traj_[i].d[2];
+        #     numpy(i, 10) = traj_[i].vel;
+        #     numpy(i, 11) = traj_[i].acc;
+        # }
+        # return numpy;
+        # }
+        """
+        # check total ref points num
+        # check max ref interval
+        # trim reflane
+        if ref_check:
+            ref_info = self.trim_reflane(ref_info,x,y)
+        wx = ref_info[...,0]
+        wy = ref_info[...,1]
+        ss = get_arc_length(ref_info[...,:2])
+        
+        self.c_sampler.set_init_state(x,y,yaw,v,acc)
+        self.c_sampler.set_reference_line(wx,wy,ss)
+        self.c_sampler.sample(self.T)
+        self.c_sampler.sample_global_state(self.Ts)
+        trajs = self.c_sampler.get_trajectories(exclude_invalid=True)
+        
+        trajs = np.array(trajs)
+        fut_traj = [trajs[...,0:2], 
+                    np.arctan2(trajs[...,3:4],trajs[...,2:3]),
+                    trajs[...,10:11]]
+        fut_traj = np.concatenate(fut_traj,axis=-1)
+        return fut_traj
+    
+    def trim_reflane(self, ref_info: np.ndarray, x:float, y:float):
+        ss = get_arc_length(ref_info[...,:2])
+        if np.amax(ss)>self.ref_length_lim:
+            # find -5, 70 reflane
+            current = np.array([[x,y]])
+            front_distance = 5./np.diff(ss,axis=0).mean()
+            back_distance = 70./np.diff(ss,axis=0).mean()
+            distances = np.sqrt(np.sum((ref_info[...,:2] - current)**2, axis=-1))
+            nearest_index = np.argmin(distances)
+            start_index = max(0, nearest_index - int(front_distance))
+            end_index = min(len(ref_info) - 1, nearest_index + int(back_distance))
+            ref_info = ref_info[start_index:end_index+1]
+        if len(ref_info)>250:
+            interval = int(np.round(len(ref_info)/250))
+            ref_info = ref_info[::interval]
+        # plt.scatter(ref_info[...,0], ref_info[...,1])
+        return ref_info
+        
+if __name__=="__main__":
+    x = torch.linspace(-10,80,1200)
+    # y = torch.zeros_like(x)
+    # y = torch.sin(x/20)
+    y = (x/5)**2
+    w = torch.stack([x,y],dim=-1).numpy()
+    sampler = LatticeSampler()
+    trajs = sampler.sampling(w,0.,2.,0.8,2.,0.)
+    for traj in trajs:
+        plt.plot(traj[...,0], traj[...,1])
+    plt.plot(x,y)
+    plt.axis('equal')
+    plt.show()

@@ -7,12 +7,12 @@ import torch
 import tensorflow as tf
 from tqdm import tqdm
 from torch.utils.data import DataLoader, SequentialSampler
-from common_utils import inference, load_checkpoint
-from model.planner import BasePlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
+from common_utils import inference, init_planner, load_checkpoint
+from model.planner import Planner
 from statistic import static_result
-from utils.riskmap.utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here
 from utils.test_utils import batch_check_collision, batch_check_dynamics, batch_check_prediction, batch_check_similarity, batch_check_traffic
-from utils.train_utils import DrivingData
+from utils.data_utils import DrivingData
 
 
 def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch, distributed=False):
@@ -110,18 +110,7 @@ def op_test():
 
     # %% initializing planner
     logging.info(f"Initialize planner {cfg['planner']['name']}")
-    if args.use_planning:
-        if cfg['planner']['name'] == 'dipp':
-            trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
-        if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
-        if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
-        if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.device)
-    else:
-        planner = None
+    planner = init_planner(args, cfg, predictor)
 
 
     batch_op_test(valid_loader,predictor.eval(),planner,args.use_planning,epoch=0,distributed=False)

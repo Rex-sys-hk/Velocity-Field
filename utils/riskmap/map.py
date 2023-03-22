@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.optim
 import numpy as np
 import sys
-from .utils import (has_nan, 
+from .rm_utils import (has_nan, 
                     load_cfg_here,
                     safety,
                     acceleration,

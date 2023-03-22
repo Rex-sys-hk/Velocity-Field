@@ -5,9 +5,8 @@ import torch
 import torch.functional as F
 from model.meter2risk import Meter2Risk
 
-from .utils import has_nan
-from .torch_lattice import torchLatticePlanner
-from utils.riskmap.utils import load_cfg_here
+from .rm_utils import has_nan
+from utils.riskmap.rm_utils import load_cfg_here
 # from .utils import convert2detail_state
 from .map import Map
 from .car import (move,

@@ -7,10 +7,11 @@ FilePath: /DIPP/common_utils.py
 Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 '''
 import torch
+import numpy as np
 from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre, STCostMap
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
-from utils.riskmap.car import pi_2_pi
-from utils.train_utils import bicycle_model, select_future
+from utils.riskmap.car import bicycle_model, pi_2_pi
+from utils.train_utils import select_future
 predictor_selection = {'base': BasePre,
                        'dipp': Predictor,
                        'risk': RiskMapPre,
@@ -58,6 +59,23 @@ def load_checkpoint(model_file, map_location = 'cpu'):
     lr = model_dict['lr']  if 'lr' in model_dict.keys() else 1e-4
     print('load succeed')
     return predictor, epoch, lr
+
+def init_planner(args, cfg, predictor):
+    if args.use_planning:
+        if cfg['planner']['name'] == 'dipp':
+            trajectory_len, feature_len = 50, 9
+            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
+        if cfg['planner']['name'] == 'risk':
+            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
+        if cfg['planner']['name'] == 'base':
+            planner = BasePlanner(device= args.device)
+        if cfg['planner']['name'] == 'esp':
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
+        if cfg['planner']['name'] == 'nmp':
+            planner = CostMapPlanner(predictor.meter2risk, device=args.device)
+    else:
+        planner = None
+    return planner
 
 def inference(batch, predictor, planner, args, use_planning, distributed=False):
     try:
@@ -145,3 +163,23 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False):
             plan, _ = planner.plan(planner_inputs) # control
 
     return plan, prediction
+
+def cellect_results(results):
+    collisions, progress = [], []
+    # zero = []
+    traffic_light, off_routes = [], []
+    Accs, Jerks, Lat_Accs = [], [], []
+    Human_Accs, Human_Jerks, Human_Lat_Accs = [], [], []
+    similarity_3s, similarity_5s, similarity_10s = [], [], []
+    # prediction_ADE, prediction_FDE = [], []
+    data={
+          'collision':collisions, 'off_route':off_routes, 'traffic_light':traffic_light, 
+          'progress': progress,
+        'Acc':Accs, 'Jerk':Jerks, 'Lat_Acc':Lat_Accs, 
+        'Human_Acc':Human_Accs, 'Human_Jerk':Human_Jerks, 'Human_Lat_Acc':Human_Lat_Accs,
+        'Human_L2_3s':similarity_3s, 'Human_L2_5s':similarity_5s, 'Human_L2_10s':similarity_10s}
+    for d in results:
+        for k in d.keys():
+            if k!= 'Unnamed: 0':
+                data[k].extend(np.nan_to_num(d[k],nan=0))
+    return data
