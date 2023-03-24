@@ -3,7 +3,7 @@ model_cfg:
   name: 'base'
   future_steps: 50
   mode_num: 8
-  gamma: 1.
+  gamma: 0.99
 
 planner: 
   name: 'base'
