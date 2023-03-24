@@ -14,13 +14,10 @@ import math
 from torch import nn, true_divide
 
 from utils.train_utils import project_to_frenet_frame
-from .car import WB, bicycle_model
+from .car import WB, bicycle_model, pi_2_pi, pi_2_pi_pos
 from math import cos, sin, tan, pi
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# device = torch.device("cpu")
-
-
 # Initialize ray:
 num_cpus = psutil.cpu_count(logical=False)
 # ray.init(num_cpus=num_cpus, log_to_driver=False)
@@ -37,50 +34,6 @@ def correct_yaw(yaw: float) -> float:
         yaw = np.pi - yaw
 
     return yaw
-
-def pi_2_pi(angle):
-    # return (angle + pi) % (2 * pi) - pi
-    return (angle%(2*pi))
-
-def pi_2_pi_pos(angle):
-    return (angle + 2*pi) % (2 * pi)
-
-def rad_2_degree(rad):
-    return (pi_2_pi(rad)/pi)*180
-
-
-def degree_2_rad(degree):
-    return pi_2_pi((degree/180)*pi)
-
-
-def steering_to_yawrate(steer, v, L=WB):
-    return tan(steer)*v/L
-
-def torch_yawrate_to_steering(yawrate,v,L=WB):
-    return torch.atan2(yawrate*L,v)
-
-def get_arc_length(array: np.ndarray) -> np.ndarray:
-    displacement = np.cumsum(
-        np.linalg.norm(np.diff(array[:, :2], axis=0), axis=1), axis=0
-    )
-    return np.pad(displacement, (1, 0), mode="constant")
-
-def reduce_way_point(waypoint:np.ndarray, interval = 0.2)-> np.ndarray:
-    ds = np.linalg.norm(np.diff(waypoint[...,:2],n=1,axis=0),axis=-1)
-    ds = ds
-    wp = waypoint[:-1,:2]
-    w = [wp[0]]
-    sl = 0.
-    # ss = [sl]
-    last_dw = 0
-    for wp_t,ds_t in zip(wp,ds):
-        if sl-last_dw>=interval:
-            # ss.append(sl)
-            w.append(wp_t)
-            last_dw = sl
-        sl += ds_t
-    w = np.stack(w,axis=0)
-    return w
 
 def k_means_anchors(k, ds):
     """

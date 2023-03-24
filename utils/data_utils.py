@@ -10,8 +10,8 @@ from torch import tensor
 import os
 import glob
 from torch.utils.data import Dataset
-from utils.riskmap.car import bicycle_model
-from utils.riskmap.rm_utils import get_u_from_X, pi_2_pi, yawv2yawdxdy
+from utils.riskmap.car import bicycle_model, pi_2_pi, pi_2_pi_pos
+from utils.riskmap.rm_utils import get_u_from_X, yawv2yawdxdy
 from utils.riskmap.torch_lattice import LatticeSampler
 import matplotlib.pyplot as plt
 def wrap_to_pi(theta):
@@ -423,11 +423,12 @@ class DrivingData(Dataset):
         ## aug gt
         # use lattice planner sample trajs
         current = a_ego[-1].numpy()
+        v = torch.norm(a_ego[-1, 3:5],dim=-1).numpy()
         l_trajs = self.sampler.sampling(ref_line,
                                 current[0],
                                 current[1],
-                                pi_2_pi(current[2]),
-                                current[3])
+                                pi_2_pi_pos(current[2]),
+                                v)
         l_trajs = tensor(l_trajs)
         l_trajs = yawv2yawdxdy(l_trajs)
         l_trajs = torch.nan_to_num(l_trajs, nan=np.inf)
@@ -472,7 +473,7 @@ class DrivingData(Dataset):
         return a_ego, trajs[index]
         
     def inversing_yawv(self, X):
-        X[...,2] = pi_2_pi(X[...,2]+torch.pi)
+        X[...,2] = pi_2_pi_pos(X[...,2]+torch.pi)
         X[...,3] = -X[...,3]
         X[...,4] = -X[...,4]
         return X

@@ -8,7 +8,7 @@ try:
 except:
     print('[WARNING] FrenetSampler is not implemented')
     pass
-from .car import (move,
+from .car import (bicycle_model, move,
                   steering_to_yawrate,
                   rad_2_degree,
                   degree_2_rad,
@@ -216,7 +216,7 @@ class LatticeSampler():
     def __init__(self) -> None:
         self.T = 5.0
         self.Ts = np.linspace(0.1,5.0,50)
-        self.c_sampler = FrenetSampler('/mnt/c/Users/87649/Desktop/working_space/DIPP/utils/riskmap/mpp/frenet_sampler.train.json')
+        self.c_sampler = FrenetSampler('utils/riskmap/mpp/frenet_sampler.train.json')
         self.ref_length_lim = 80
         
     def sampling(self,
