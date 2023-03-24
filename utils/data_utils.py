@@ -6,7 +6,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.affinity import affine_transform, rotate
 from utils.cubic_spline_planner import Spline2D
 import torch
-from torch import tensor
+from torch import norm, tensor
 import os
 import glob
 from torch.utils.data import Dataset
@@ -400,7 +400,7 @@ class DrivingData(Dataset):
         map_crosswalks = data['map_crosswalks']
         gt_future_states = data['gt_future_states']
         # print(ego.shape, gt_future_states.shape)
-        if self.data_aug:
+        if self.data_aug and np.random.rand(1)<0.5:
             ego_aug, gt_future_states_aug =  self.data_augment(ego,gt_future_states, ref_line)
             ego[...,:5] = ego_aug
             gt_future_states[0,...,:5] = gt_future_states_aug
@@ -414,7 +414,7 @@ class DrivingData(Dataset):
         s_ego = self.get_sample(
             ego[0],
             get_u_from_X(ego[1:],ego[0]),
-            tensor([0.2, 0.01]),
+            tensor([0.8, 0.5]),
             1,
             turb_num=19)
         a_ego = torch.cat([ego[0:1,:5],s_ego[0]],dim=0)
@@ -446,17 +446,20 @@ class DrivingData(Dataset):
         inv_traj = self.get_sample(
             inv_current,
             inv_u,
-            tensor([0.1, 0.005]),
-            200,
+            tensor([0.5, 0.3]),
+            300,
             1)
-        # inv_traj = inv_traj[torch.norm(inv_traj[:,-1,:2]-a_ego[-1,:2],dim=-1)<=0.3]
-        # find the one closest to gt
+        
         ind = torch.argmin(
-                    torch.norm(inv_traj[:,-1,:3]-a_ego[-1,:3], dim=-1))
+                    torch.norm(inv_traj[:,-1,:2]-a_ego[-1,:2], dim=-1))
         s_inv_traj = inv_traj[ind:ind+1].flip(dims=[1])
         s_inv_traj = self.inversing_yawv(s_inv_traj)
-        s_inv_traj = torch.cat([s_inv_traj[0:1,1:], gt[0:1,-1:]],dim=-2)
-        trajs = torch.cat([l_trajs, s_inv_traj],dim=0)
+        if torch.norm(s_inv_traj[0,0,:2]-a_ego[-1,:2],dim=-1)<=0.2:
+            # find the one closest to gt
+            s_inv_traj = torch.cat([s_inv_traj[0:1,1:], gt[0:1,-1:]],dim=-2)
+            trajs = torch.cat([l_trajs, s_inv_traj],dim=0)
+        else:
+            trajs = l_trajs
 
         # plt.scatter(gt[0,:,0], gt[0,:,1], color='green')
         # plt.plot(ego[...,0], ego[...,1],'r')
@@ -467,10 +470,15 @@ class DrivingData(Dataset):
         # for t in inv_traj:
         #     plt.plot(t[...,0], t[...,1], 'green', lw=0.1)
         dis = torch.norm(trajs[...,:2]-gt[0:1][...,:2],dim=-1)
-        index = torch.argmin(dis.sum(dim=-1))
-        # plt.scatter(trajs[index][...,0], trajs[index][...,1], color='cyan')
+        index = torch.argmin(dis.mean(dim=-1))
+        if torch.norm(gt[0,-5:,:2]-trajs[index,-5:,:2],dim=-1).mean()<=2:
+            new_gt = trajs[index]
+        else:
+            new_gt = gt[0]
+        # plt.scatter(new_gt[...,0], new_gt[...,1], color='cyan')
+        # plt.axis('equal')
         # plt.show()
-        return a_ego, trajs[index]
+        return a_ego, new_gt
         
     def inversing_yawv(self, X):
         X[...,2] = pi_2_pi_pos(X[...,2]+torch.pi)
