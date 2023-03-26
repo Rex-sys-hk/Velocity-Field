@@ -78,7 +78,7 @@ class Simulator(DataProcess):
         # process data
         obs = self.feed_data(self.timestep, True)
         if obs is None:
-            return None, True, (False, False)
+            return None, True, (False, False, False)
 
         # check
         collision = self.check_collision()
