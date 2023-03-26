@@ -70,7 +70,7 @@ def init_planner(args, cfg, predictor):
         if cfg['planner']['name'] == 'base':
             planner = BasePlanner(device= args.device)
         if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.local_rank)
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
         if cfg['planner']['name'] == 'nmp':
             planner = CostMapPlanner(predictor.meter2risk, device=args.device)
     else:
