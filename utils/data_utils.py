@@ -414,24 +414,30 @@ class DrivingData(Dataset):
         s_ego = self.get_sample(
             ego[0],
             get_u_from_X(ego[1:],ego[0]),
-            tensor([0.8, 0.5]),
+            tensor([0.5, 0.3]),
             1,
             turb_num=19)
         a_ego = torch.cat([ego[0:1,:5],s_ego[0]],dim=0)
         if torch.norm(ego[-1,:2]-a_ego[-1,:2],dim=-1)<0.3:
             return a_ego, gt[0,:,:5]
-        ## aug gt
-        # use lattice planner sample trajs
-        current = a_ego[-1].numpy()
-        v = torch.norm(a_ego[-1, 3:5],dim=-1).numpy()
-        l_trajs = self.sampler.sampling(ref_line,
-                                current[0],
-                                current[1],
-                                pi_2_pi_pos(current[2]),
-                                v)
-        l_trajs = tensor(l_trajs)
+        # ## aug gt TODO
+        # # use lattice planner sample trajs
+        # current = a_ego[-1].numpy()
+        # v = torch.norm(a_ego[-1, 3:5],dim=-1).numpy()
+        # l_trajs = self.sampler.sampling(ref_line,
+        #                         current[0],
+        #                         current[1],
+        #                         pi_2_pi_pos(current[2]),
+        #                         v)
+        # l_trajs = tensor(l_trajs)
+        # l_trajs = yawv2yawdxdy(l_trajs)
+        # l_trajs = torch.nan_to_num(l_trajs, nan=np.inf)
+        ## emergency stop
+        break_u = get_u_from_X(gt[0:1,:,:5],ego[-1:])
+        break_u[...,0] = -3
+        l_trajs = bicycle_model(break_u,ego[-1:])
         l_trajs = yawv2yawdxdy(l_trajs)
-        l_trajs = torch.nan_to_num(l_trajs, nan=np.inf)
+
         # consider gt last point as current state, 
         # and sampling with gaussian noise, 
         # find the a_ego nearest traj

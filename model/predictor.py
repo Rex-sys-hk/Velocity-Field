@@ -7,6 +7,7 @@ from turtle import color
 from sklearn.preprocessing import scale
 import torch
 from torch import int64, long, nn
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from utils.riskmap.rm_utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
@@ -634,37 +635,120 @@ class EularPre(nn.Module):
 class CostMapDecoder(nn.Module):
     def __init__(self) -> None:
         super(CostMapDecoder, self).__init__()
-        self.map_feat_emb = nn.Sequential(nn.Linear(256*9, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+        # self.map_feat_emb = nn.Sequential(nn.Linear(256*9, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
         self.emb = nn.Sequential(nn.Linear(6, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
         self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
         self.transformer = nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,1))
+        self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU())
+        self.embedding = nn.Sequential(nn.Dropout(0.1), nn.Linear(512*self.mode_num, 256), nn.ELU(), nn.Linear(256, 64))
         self._map_feature = None
         self._agent_feature = None
         self._masks = None
         
-    def set_latent_feature(self, map_feature, agent_feature):
-        self._map_feature = map_feature
-        # self._masks = map_masks[:,0]
-        self._agent_feature = agent_feature
+    def set_latent_feature(self, map_feature, agent_map, agent_agent):
+        map_feature = map_feature.view(map_feature.shape[0], -1, map_feature.shape[-1])
+        map_feature = torch.max(map_feature, dim=1)[0]
+        agent_agent = torch.max(agent_agent, dim=1)[0]
+        agent_map = torch.max(agent_map, dim=2)[0]
+        feature = torch.cat([map_feature, agent_agent], dim=-1)
+        feature = self.reduce(feature.detach())
+        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
+        self.x = self.embedding(feature.reshape(feature.shape[0], -1))
         
 
     def forward(self, sample):
         # cross attention of self.grid and map_feature
         query = self.emb(sample)
-        b,m,d = self._map_feature.shape
-        feature = torch.cat([self._map_feature.reshape(b,-1), self._agent_feature], dim=-1)
-        feature = self.map_feat_emb(feature)
         x,_ = self.cross_attention(query,
-                                   feature.unsqueeze(1),
-                                   feature.unsqueeze(1),
-                                #    key_padding_mask = self._masks,
+                                   self.x.unsqueeze(1),
+                                   self.x.unsqueeze(1),
                                    )
         cost = self.transformer(x)
         return cost
 
+class TConvCostVolumeDecoder(nn.Module):
+    def __init__(self, bev_channels, cost_filter_sizes, cost_filter_nums, planning_horizon):
+        super(TConvCostVolumeDecoder, self).__init__()
+        cfg = load_cfg_here()
+        self.bev_channels = bev_channels
+        self.cost_filter_sizes = cost_filter_sizes
+        self.cost_filter_nums = cost_filter_nums
+        self.planning_horizon = planning_horizon
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+
+        # embedding layers
+        self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU())
+        self.embedding = nn.Sequential(nn.Dropout(0.1), nn.Linear(512*self.mode_num, 11000), nn.ELU())
+
+        # Two add on deconvolution layers with stride 2
+        self.deconv01 = nn.ConvTranspose2d(10, 64, 3, stride=2)
+        self.bn01 = nn.BatchNorm2d(64)
+        self.deconv02 = nn.ConvTranspose2d(64, 256, 3, stride=2)
+        self.bn02 = nn.BatchNorm2d(256)
+
+        # Two deconvolution layers with stride 2
+        self.deconv1 = nn.ConvTranspose2d(self.bev_channels, self.cost_filter_nums[0], self.cost_filter_sizes[0], stride=2)
+        self.bn1 = nn.BatchNorm2d(self.cost_filter_nums[0])
+        self.deconv2 = nn.ConvTranspose2d(self.cost_filter_nums[0], self.cost_filter_nums[1], self.cost_filter_sizes[0], stride=2)
+        self.bn2 = nn.BatchNorm2d(self.cost_filter_nums[1])
+
+        # # Two convolution layers with stride 1
+        # self.conv1 = nn.Conv2d(self.cost_filter_nums[1], self.cost_filter_nums[0], self.cost_filter_sizes[0], stride=1, padding=1)
+        # self.bn3 = nn.BatchNorm2d(self.cost_filter_nums[0])
+        # self.conv2 = nn.Conv2d(self.cost_filter_nums[0], self.cost_filter_nums[1], self.cost_filter_sizes[1], stride=1, padding=1)
+        # self.bn4 = nn.BatchNorm2d(self.cost_filter_nums[1])
+
+        # Final convolution layer with filter number T
+        # self.cost_layer = nn.Conv2d(self.cost_filter_nums[1], self.planning_horizon, 1, stride=1, padding=0)
+        self.cost_layer = nn.Conv2d(64, self.planning_horizon, 1, stride=1, padding=0)
+        
+        
+    def set_latent_feature(self, map_feature, agent_map, agent_agent):
+        # self._map_feature = map_feature
+        # self._masks = map_masks[:,0]
+        # self._agent_feature = agent_feature
+        map_feature = map_feature.view(map_feature.shape[0], -1, map_feature.shape[-1])
+        map_feature = torch.max(map_feature, dim=1)[0]
+        agent_agent = torch.max(agent_agent, dim=1)[0]
+        agent_map = torch.max(agent_map, dim=2)[0]
+        feature = torch.cat([map_feature, agent_agent], dim=-1)
+        feature = self.reduce(feature.detach())
+        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
+        x = self.embedding(feature.reshape(feature.shape[0], -1))
+        x = x.reshape(x.shape[0],10,44,25)
+        
+        self.cost_volume = self.forward(x)
+        
+    def forward(self, x):
+        # add on decovolution layers
+        x = self.bn01(self.deconv01(x))
+        x = self.bn02(self.deconv02(x))
+        # Deconvolution layers
+        x = self.bn1(self.deconv1(x))
+        x = self.bn2(self.deconv2(x))
+
+        # # Convolution layers
+        # x = self.bn3(self.conv1(x))
+        # x = F.relu(x)
+        # x = self.bn4(self.conv2(x))
+        # x = F.relu(x)
+
+        # Final cost volume layer
+        c = self.cost_layer(x)
+
+        # Clip cost volume values between -1000 to +1000
+        c = torch.clamp(c, -1000, 1000)
+        # directly trim the cost volume be in the same shape with the Lidar data
+        return c[...,8:712,8:408]
+
 class STCostMap(nn.Module):
     def __init__(self, th = 50) -> None:
         super(STCostMap, self).__init__()
+        """
+        t resolution is 0.1
+        """
         self.th = th
         self.real_t = 5.0
         self.resolution_t = 0.1
@@ -678,26 +762,22 @@ class STCostMap(nn.Module):
         # make grid
         s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
-        t = torch.linspace(0.1, self.real_t, self.th) # 5.0 s-->50 steps
-        self.t = t
+        t = torch.linspace(self.resolution_t, self.real_t, self.th) # 5.0 s-->50 steps
         x,y,t = torch.meshgrid(s,l,t,indexing='xy')
-        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1).reshape(1, -1, 6)
+        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
         self.cost_map = None
-        self.cost = CostMapDecoder()
+        self.cost = None #CostMapDecoder()
 
     def metric2index(self, s, l, t):
         idx_s = torch.floor((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)
         idx_l = torch.floor((l+self.side_range)/self.resolution_l).clip(0,self.steps_l-1)
-        idx_t = torch.floor((t-0.1)/self.resolution_t)
+        idx_t = torch.floor((t-self.resolution_t)/self.resolution_t)
         idx = idx_s+idx_l*self.steps_s+idx_t*self.steps_l*self.steps_s
         return idx.to(dtype=long).clip(0,self.steps_s*self.steps_l-1)
     
-    def get_cost(self, device):
-        self.cost_map = self.cost(self.grid_points.to(device))  #.reshape(yaw_v.shape[0],self.steps_s,self.steps_l,-1)
-
     def get_cost_by_pos(self,samples):
         btsz, sample, th, dim = samples.shape
-        t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        t = torch.linspace(self.real_t/th, self.real_t, th).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
         # grid map utils
         # idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
         # cost = torch.stack([self.cost_map[i,m] for i,m in enumerate(idx)],dim=0)
@@ -708,27 +788,29 @@ class STCostMap(nn.Module):
         cost = self.cost(query)
         return cost.view(btsz, sample, th, 1)
     
-    def plot(self, samples = None, interval = 5):
-        # if samples != None:
-        #     btsz, sample, th, dim = samples.shape
-        #     t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
-        #     idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
-        #     xy = torch.stack([self.grid_points[0,m.cpu()] for i,m in enumerate(idx)],dim=0)
-        #     plt.scatter(xy[...,0].cpu().detach(),
-        #                 xy[...,1].cpu().detach(),
-        #                 c = xy[...,2].cpu().detach(),
-        #                 label='Visited Grid')
-        # cost = self.cost_map[0].reshape(self.steps_s,self.steps_l,self.th,-1)
+    def plot(self, samples = None, interval = 1):
+        L, S, T, d = self.grid_points.shape
         with torch.no_grad():
-            cost = self.cost(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
-        fig = plt.figure()
-        ax = fig.add_subplot(projection='3d')
-        ax.scatter(self.grid_points[0,::interval,0].cpu().detach(), 
-                   self.grid_points[0,::interval,1].cpu().detach(),
-                   self.grid_points[0,::interval,2].cpu().detach(),
-                   c = cost.reshape(-1)[::interval].cpu().detach(),
-                   alpha=0.1,
-                   label='cost value')
+            cost = self.cost(self.grid_points.to(samples.device).view(1,-1,6).repeat(samples.shape[0],1,1))[0]
+        # fig = plt.figure()
+        # ax = fig.add_subplot(projection='3d')
+        # ax.scatter(self.grid_points[0,::interval,0].cpu().detach(), 
+        #            self.grid_points[0,::interval,1].cpu().detach(),
+        #            self.grid_points[0,::interval,2].cpu().detach(),
+        #            c = cost.reshape(-1)[::interval].cpu().detach(),
+        #            alpha=0.1,
+        #            label='cost value')
+        grid_points = self.grid_points[:,:,::interval,:].cpu().detach()
+        cost = cost.reshape(L,S,T,1)[:,:,::interval,:].cpu().detach()
+        for t in range(T):
+            cost_t = cost[:,:,t,0].cpu().detach()
+            c = cost_t[cost_t<cost_t.mean()]
+            plt.scatter(grid_points[...,t,0][cost_t<cost_t.mean()].cpu().detach(), 
+                        grid_points[...,t,1][cost_t<cost_t.mean()].cpu().detach(),
+                        c = c,
+                        alpha=0.05,
+                        label=f'time = {t*self.resolution_t}'
+                        )
         
     # def plot_gt(self, gt, samples):
     #     diff_sample_gt = 0
@@ -751,6 +833,77 @@ class STCostMap(nn.Module):
     #         c = sample_cost[...,0],
     #         # color = 'green',
     #         label='GT Vector')
+class AttCostMap(STCostMap):
+    def __init__(self, th=50) -> None:
+        super().__init__(th)
+        """
+        t resolution = 0.5s
+        """
+        self.resolution_t = 0.5
+        self.th = int(self.real_t/self.resolution_t)
+        self.steps_s = int(50)
+        self.steps_l = int(25)
+        self.cost = CostMapDecoder()
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
+        t = torch.linspace(self.resolution_t, self.real_t, self.th) # 5.0 s-->50 steps
+        x,y,t = torch.meshgrid(s,l,t,indexing='xy')
+        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
+        
+        
+        
+class TConvCostMap(STCostMap):
+    def __init__(self, th=50) -> None:
+        super().__init__(th)
+        self.resolution_t = 0.5
+        self.th = int(self.real_t/self.resolution_t)
+        self.steps_s = int(704)
+        self.steps_l = int(400)
+        self.cost = TConvCostVolumeDecoder(
+                            bev_channels=256, # 176*100
+                            cost_filter_sizes=[3,3],
+                            cost_filter_nums=[128,64],
+                            planning_horizon=self.th,
+                            )
+        # only for visulization
+        s = torch.linspace(-self.rear_range,self.front_range,self.steps_s)[::10]
+        l = torch.linspace(-self.side_range,self.side_range,self.steps_l)[::10]
+        t = torch.linspace(self.resolution_t, self.real_t, self.th)
+        x,y,t = torch.meshgrid(s,l,t,indexing='xy')
+        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
+
+    def metric2index(self, s, l, t):
+        idx_s = torch.round((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)
+        idx_l = torch.round((l+self.side_range)/self.resolution_l).clip(0,self.steps_l-1)
+        idx_t = torch.round((t-self.resolution_t)/self.resolution_t)
+        return torch.stack([idx_t,idx_s,idx_l],dim=-1).to(dtype=long)
+
+    def get_cost_by_pos(self,samples):
+        btsz, sample, th, dim = samples.shape
+        # t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        t = torch.linspace(self.real_t/th, self.real_t, th).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        # inquiry utils
+        samples = samples.view(btsz,-1,dim)
+        query = self.metric2index(samples[...,0], samples[...,1], t)
+        cost = []
+        for i in range(query.shape[0]):
+            cost.append(self.cost.cost_volume[i,query[i,...,0],query[i,...,1],query[i,...,2]])
+        cost = torch.stack(cost, dim=0)
+        return cost.view(btsz, sample, th, 1)
+    
+    def plot(self, samples = None, interval = 1):
+        L, S, T, d = self.grid_points[:,:,::interval,:].shape
+        grid_points = self.grid_points[:,:,::interval,:].cpu().detach()
+        cost = self.cost.cost_volume[0].cpu().detach().permute(2,1,0)[::10,::10,::interval]
+        for t in range(T):
+            cost_t = cost[:,:,t].cpu().detach()
+            c = cost_t[cost_t<cost_t.mean()]
+            plt.scatter(grid_points[...,t,0][cost_t<cost_t.mean()].cpu().detach(), 
+                        grid_points[...,t,1][cost_t<cost_t.mean()].cpu().detach(),
+                        c = c,
+                        alpha=0.05,
+                        label=f'time = {t*self.resolution_t}'
+                        )
 
 class CostVolume(nn.Module):
     def __init__(self, name:str = 'nmp', future_steps = 50, mode_num = 3, gamma = 1.):
@@ -780,8 +933,10 @@ class CostVolume(nn.Module):
         self.plan = AVDecoderNc(self._future_steps)
         self.predict = AgentDecoder(self._future_steps)
         self.score = Score()
-        
-        self.cost_volume = STCostMap(self._future_steps)
+        if cfg['planner']['conv_decoder']:
+            self.cost_volume = TConvCostMap(self._future_steps)
+        else:
+            self.cost_volume = AttCostMap(self._future_steps)
         self.meter2risk: Meter2Risk = None#CostModules[cfg['planner']['meter2risk']['name']]()
 
     def forward(self, ego, neighbors, map_lanes, map_crosswalks):
@@ -821,7 +976,7 @@ class CostVolume(nn.Module):
         plans, _ = self.plan(agent_map[:, :, 0], agent_agent[:, 0])
         predictions = self.predict(agent_map[:, :, 1:], agent_agent[:, 1:], neighbors[:, :, -1])
         scores = self.score(map_feature, agent_agent, agent_map)
-        self.cost_volume.cost.set_latent_feature(agent_map[:, :, 0], agent_agent[:, 0])
+        self.cost_volume.cost.set_latent_feature(map_feature, agent_map, agent_agent)
         return plans, predictions, scores, self.cost_volume
 
 if __name__ == "__main__":

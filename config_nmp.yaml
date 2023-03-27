@@ -7,6 +7,7 @@ model_cfg:
 
 planner: 
   name: 'nmp'
+  conv_decoder: True
   cost_items: 3
   time_horizon: 50 # same as future_steps
 
