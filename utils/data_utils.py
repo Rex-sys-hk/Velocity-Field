@@ -453,8 +453,8 @@ class DrivingData(Dataset):
             inv_current,
             inv_u,
             tensor([0.5, 0.3]),
-            300,
-            1)
+            400,
+            50)
         
         ind = torch.argmin(
                     torch.norm(inv_traj[:,-1,:2]-a_ego[-1,:2], dim=-1))

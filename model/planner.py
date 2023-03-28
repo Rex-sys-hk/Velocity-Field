@@ -298,7 +298,7 @@ class CostMapPlanner(Planner):
         self.name = 'nmp'
         # self.lattice_planner = torchLatticePlanner(device, test=test)
         self.hand_prefer = torch.softmax(
-            torch.tensor(self.cfg['risk_preference'], device=device), dim=0
+            torch.tensor(self.cfg['risk_preference']), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
         self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
@@ -337,7 +337,7 @@ class CostMapPlanner(Planner):
         return self.plan_result
 
     def selector(self, risks, sample_plan):
-        costs = risks*self.hand_prefer[:risks.shape[-1]]
+        costs = risks*self.hand_prefer[:risks.shape[-1]].to(risks.device)
         i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
         X,u = [],[]
         sampleX = sample_plan['X']
