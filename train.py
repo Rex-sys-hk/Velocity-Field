@@ -83,10 +83,11 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
             u, prediction = select_future(plans, predictions, best_mode)
-            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u, ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[..., :3], ground_truth[:, 0, :, :3]) 
-            loss += F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -103,10 +104,11 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
             u, prediction = select_future(plans, predictions, best_mode)
             # guess loss
-            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -121,23 +123,17 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
             loss += vf_map.get_loss(ground_truth[...,0:1,:,:], 
                                     planner.gt_sample['X'])
-        ## BASELINE
-        elif planner.name=='base':
-            # not choosing the nearest, but highest score one
-            plan, prediction = select_future(plan_trajs, predictions, best_mode)
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
-            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
-            loss += plan_loss
         ## Neural Motion Planner
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
             cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
             u, prediction = select_future(plans, predictions, best_mode)
             # guess loss
-            loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -150,6 +146,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             loss += planner.get_loss(ground_truth[...,0:1,:,:],
                                      tb_iters,
                                      tbwriter)
+        ## BASELINE
+        elif planner.name=='base':
+            # not choosing the nearest, but highest score one
+            plan, prediction = select_future(plan_trajs, predictions, best_mode)
+            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
+            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            loss += plan_loss
         # loss backward
         loss.backward()
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)
