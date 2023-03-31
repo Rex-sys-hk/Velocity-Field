@@ -1,3 +1,4 @@
+from turtle import color, width
 import torch
 from torch import int64, long, nn
 import torch.nn.functional as F
@@ -264,15 +265,19 @@ class VectorField(nn.Module):
             samples.reshape(b,-1,d)[0,...,1].cpu().detach(),
             sample_dx_dy[0,...,0].cpu().detach(),
             sample_dx_dy[0,...,1].cpu().detach(),
-            label='Sampled Vector Field',
-            color='yellow')
+            label='Plan Sampled Vector',
+            width=0.001,
+            color='red')
         
         dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
                    dx_dy[...,0].cpu().detach(),
                    dx_dy[...,1].cpu().detach(),
-                   label='Vector Field')
+                   label='Vis Vector Field',
+                   width=0.001,
+                   color='k'
+                   )
         
     def plot_gt(self, gt, samples):
         diff_sample_gt = 0
@@ -292,6 +297,7 @@ class VectorField(nn.Module):
             diff_sample_gt[0,...,0].cpu().detach(),
             diff_sample_gt[0,...,1].cpu().detach(), 
             color = 'green',
+            width=0.001,
             label='GT Vector')
         
     def get_loss(self, gt, sample):

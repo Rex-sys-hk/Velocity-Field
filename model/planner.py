@@ -1,9 +1,10 @@
 import logging
 import sys
 import os
+from turtle import TurtleScreenBase
 from matplotlib.pyplot import flag
 import torch
-from utils.riskmap.car import bicycle_model
+from utils.riskmap.car import bicycle_model, pi_2_pi
 from utils.test_utils import batch_check_collision, batch_check_traffic, batch_sample_check_collision, batch_sample_check_traffic
 try:
     import theseus as th
@@ -15,12 +16,26 @@ from model.meter2risk import Meter2Risk
 from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
+def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.2]), sample_num=100, turb_num=1):
+    btsz = context['init_guess_u'].shape[0]
+    cov = cov.to(context['init_guess_u'].device)
+    init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
+    init_guess_u=init_guess_u.unsqueeze(1)
+    init_guess_u[...,1] = pi_2_pi(init_guess_u[...,1])
+    u = (torch.randn([btsz,sample_num,turb_num,2],device = init_guess_u.device)*cov)+init_guess_u
+    cur_state = context['current_state'][:,0:1]
+    X = bicycle_model(u,cur_state)
+    u = torch.cat([init_guess_u,u],dim=1)
+    X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
+    return {'X':X,'u':u}
+
 class Planner:
     def __init__(self, device='cuda:0', test=False) -> None:
         self.name = None
         self.device = device
         self.cfg = load_cfg_here()['planner']
         self.test = test
+
 
 
 class BasePlanner(Planner):
@@ -90,18 +105,6 @@ class EularSamplingPlanner(Planner):
             self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
-
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
-        btsz = context['init_guess_u'].shape[0]
-        cov = cov.to(context['init_guess_u'].device)
-        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
-        cur_state = context['current_state'][:,0:1]
-        X = bicycle_model(u,cur_state)
-        u = torch.cat([init_guess_u,u],dim=1)
-        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
-        return {'X':X,'u':u}
     
     def selector(self, costs, sample_plan):
         i = torch.argmin(costs,dim=1)
@@ -117,7 +120,10 @@ class EularSamplingPlanner(Planner):
 
     def plan(self, context):
         self.context = context
-        self.sample_plan = self.get_sample(context)
+        self.sample_plan = get_sample(context, 
+                                    cov = self.cov_base, 
+                                    sample_num=self.plan_sample_num, 
+                                    turb_num=self.turb_num)
         cost = cost_function_sample(self.sample_plan['u'], 
                                           context['current_state'], 
                                           context['predictions'], 
@@ -132,9 +138,10 @@ class EularSamplingPlanner(Planner):
         must be called after forward
         """
         u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+        self.gt_sample = get_sample(self.context,u.squeeze(1), 
                                          cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.plan_sample_num)
+                                         sample_num=self.plan_sample_num,
+                                         turb_num=self.turb_num)
         cost = cost_function_sample(self.gt_sample['u'], 
                                     self.context['current_state'], 
                                     self.context['predictions'], 
@@ -174,6 +181,8 @@ class EularSamplingPlanner(Planner):
 
         return loss
 
+
+
 class RiskMapPlanner(Planner):
     def __init__(self, meter2risk: Meter2Risk, device, test=False) -> None:
         super(RiskMapPlanner, self).__init__(device, test)
@@ -199,21 +208,12 @@ class RiskMapPlanner(Planner):
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
-        btsz = context['init_guess_u'].shape[0]
-        cov = cov.to(context['init_guess_u'].device)
-        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
-        cur_state = context['current_state'][:,0:1]
-        X = bicycle_model(u,cur_state)
-        u = torch.cat([init_guess_u,u],dim=1)
-        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
-        return {'X':X,'u':u}
-
     def plan(self, context):
         self.context = context
-        self.sample_plan = self.get_sample(context,sample_num=self.plan_sample_num)
+        self.sample_plan = get_sample(context, 
+                                      sample_num=self.plan_sample_num, 
+                                      cov=self.cov_base,
+                                      turb_num=self.turb_num)
         self.meter = risk_cost_function_sample(
                                             self.sample_plan, 
                                             self.context['current_state'], 
@@ -243,9 +243,10 @@ class RiskMapPlanner(Planner):
         must be called after forward
         """
         u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+        self.gt_sample = get_sample(self.context,u.squeeze(1), 
                                          cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.gt_sample_num)
+                                         sample_num=self.gt_sample_num,
+                                         turb_num = self.turb_num)
         raw_meter = risk_cost_function_sample(
                                             self.gt_sample, 
                                             self.context['current_state'], 
@@ -318,21 +319,13 @@ class CostMapPlanner(Planner):
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def get_sample(self, context, gt_u = None, cov = torch.tensor([0.1, 0.005]), sample_num=100):
-        btsz = context['init_guess_u'].shape[0]
-        cov = cov.to(context['init_guess_u'].device)
-        init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
-        init_guess_u=init_guess_u.unsqueeze(1)
-        u = (torch.randn([btsz,sample_num,self.turb_num,2],device = init_guess_u.device)*cov+1.)*init_guess_u
-        cur_state = context['current_state'][:,0:1]
-        X = bicycle_model(u,cur_state)
-        u = torch.cat([init_guess_u,u],dim=1)
-        X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
-        return {'X':X,'u':u}
-
     def plan(self, context):
         self.context = context
-        self.sample_plan = self.get_sample(context,sample_num=self.plan_sample_num)
+        self.sample_plan = get_sample(context,
+                                      cov=self.cov_base, 
+                                      sample_num=self.plan_sample_num, 
+                                      turb_num=self.turb_num, 
+                                      )
         self.risks = self.context['cost_map'].get_cost_by_pos(self.sample_plan['X'])
         self.plan_result = self.selector(self.risks, self.sample_plan)
         return self.plan_result
@@ -356,9 +349,10 @@ class CostMapPlanner(Planner):
         """
         loss = 0
         u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        self.gt_sample = self.get_sample(self.context,u.squeeze(1), 
+        self.gt_sample = get_sample(self.context,u.squeeze(1), 
                                          cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.gt_sample_num)
+                                         sample_num=self.gt_sample_num,
+                                         turb_num=self.turb_num)
         sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
         prob = torch.softmax(torch.mean(-sample_costs[...],dim=-1), dim=1)
         if self.cfg['loss']['dis_prob']:
