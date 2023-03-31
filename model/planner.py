@@ -8,7 +8,7 @@ from utils.test_utils import batch_check_collision, batch_check_traffic, batch_s
 try:
     import theseus as th
 except:
-    print('[WARNING] theseus is not implemented')
+    logging.warning('[WARNING] theseus is not implemented')
 from utils.train_utils import project_to_frenet_frame
 from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
