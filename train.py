@@ -12,7 +12,7 @@ import numpy as np
 from tensorboardX import SummaryWriter
 from torch import nn, optim
 from common_utils import inference, init_planner, load_checkpoint, save_checkpoint, predictor_selection
-from utils.data_utils import DrivingData
+from utils.data_loading import DrivingData
 from utils.riskmap.car import bicycle_model
 from utils.train_utils import *
 from utils.riskmap.rm_utils import get_u_from_X, has_nan, load_cfg_here
@@ -297,7 +297,7 @@ def model_training():
         distributed = True
     except:
         distributed = False
-        logging.warning('Distributed data parallele initialization failed')
+        logging.warning('[WARNING] Distributed data parallele initialization failed')
 
     # %% initializing prediction model 
     logging.info(f"Initializing Model: {cfg['model_cfg']['name']}")

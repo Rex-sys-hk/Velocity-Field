@@ -1,10 +1,16 @@
 import glob
+import logging
 import random
 import os
 import shutil
 from os import path
 import argparse
-import tensorflow as tf
+try:
+    import tensorflow as tf
+    # Disable all GPUS
+    tf.config.set_visible_devices([], 'GPU')
+except:
+    logging.warning('[WARNING] Tensorflow is not installed. Please install tensorflow==2.6.0 to use this script.')
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -14,9 +20,6 @@ from shapely.affinity import affine_transform, rotate
 from waymo_open_dataset.protos import scenario_pb2
 from multiprocessing import Pool
 from utils.data_utils import *
-
-# Disable all GPUS
-tf.config.set_visible_devices([], 'GPU')
 
 # Data process
 class DataProcess(object):

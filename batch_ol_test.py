@@ -12,7 +12,7 @@ from model.planner import Planner
 from statistic import static_result
 from utils.riskmap.rm_utils import load_cfg_here
 from utils.test_utils import batch_check_collision, batch_check_dynamics, batch_check_prediction, batch_check_similarity, batch_check_traffic
-from utils.data_utils import DrivingData
+from utils.data_loading import DrivingData
 
 
 def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch, distributed=False):
