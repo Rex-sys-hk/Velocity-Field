@@ -56,8 +56,7 @@ class Simulator(DataProcess):
         
         # update sdc state
         velocity = (xy[0] - self.sdc_state[:2]) / 0.1
-        # will this heading similar to that of input? TODO
-        heading = pi_2_pi(plan[0, 2]) + self.sdc_state[2]
+        heading = plan[0, 2] + self.sdc_state[2]
         self.sdc_state = np.concatenate([xy[0], [heading], velocity, self.sdc_state[-3:]])
         self.sdc_trajectory.append(self.sdc_state[:3]) # model past trajectory
         self.sdc_gt_trajectory.append(self.sdc_route[self.timestep]) # ground truth trajectory
@@ -216,6 +215,7 @@ class Simulator(DataProcess):
                               transform=mpl.transforms.Affine2D().rotate_around(*(self.sdc_state[0], self.sdc_state[1]), self.sdc_state[2]) + ax.transData)
         ax.add_patch(rect)
         ax.plot(self.plan[::7, 0], self.plan[::7, 1], linewidth=2, color=color, marker='.', markersize=6, zorder=4)
+        # ax.plot(self.plan[::1, 0], self.plan[::1, 1], linewidth=0.5, color=color, marker='.', markersize=3, zorder=4)
 
         # neighbors
         for i, neighbor in enumerate(self.neighbors_states['OfI_neighbors']):

@@ -54,6 +54,8 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
         # iterate scenarios in the test file
         length = [1 for s in scenarios]
         for ii, scenario in enumerate(scenarios):
+            if ii>=args.scenario_num:
+                break
             logging.info(f'\n >>>scenario {ii}/{len(length)}')
             parsed_data = scenario_pb2.Scenario()
             parsed_data.ParseFromString(scenario.numpy())
@@ -74,7 +76,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                     plan_traj = plan_traj.cpu().numpy()[0]
                     prediction = prediction.cpu().numpy()[0]
                 else:
-                    g_traj = simulator.sdc_route[simulator.timestep:simulator.timestep+51]
+                    g_traj = simulator.sdc_route[simulator.timestep+1:simulator.timestep+51]
                     current_pose = simulator.sdc_route[simulator.timestep]
                     plan_traj = g_traj.copy()
                     x = (g_traj[...,0]-current_pose[0])
@@ -145,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_set', type=str, help='path to testing datasets')
     parser.add_argument('--test_pkg_sid', type=int, help='start package counts', default=0)
     parser.add_argument('--test_pkg_num', type=int, help='test package counts', default=3)
+    parser.add_argument('--scenario_num', type=int, help='scenario counts per file', default=1000)
     parser.add_argument('--model_path', type=str, help='path to saved model')
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--render', action="store_true", help='if render the scene (default: False)', default=False)

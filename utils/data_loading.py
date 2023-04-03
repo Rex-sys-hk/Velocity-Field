@@ -1,9 +1,11 @@
 import glob
 import os
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset
+from utils.data_utils import agent_norm, map_norm, ref_line_norm
 from utils.riskmap.torch_lattice import LatticeSampler
 from utils.data_augmentation.kinematic_agent_augmentation import KinematicAgentAugmentor
 from utils.data_augmentation.nuplan_utils.trajectory import Trajectory
@@ -59,6 +61,22 @@ class DrivingData(Dataset):
             ego_aug, gt_future_states_aug =  self.data_augment(ego, gt_future_states, neighbors)
             ego[...,:5] = ego_aug
             gt_future_states[0,...,:5] = gt_future_states_aug
+            (ego, neighbors, 
+             map_lanes, map_crosswalks, 
+             ref_line, gt_future_states) = self.normalize_data(
+                                                                ego[-1,:2],
+                                                                ego[-1,2],
+                                                                ego,
+                                                                neighbors,
+                                                                map_lanes,
+                                                                map_crosswalks,
+                                                                ref_line,
+                                                                gt_future_states,
+                                                                viz=False
+                                                            )
+            # center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True
+            # ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
+        # normalize base on the new GT
         # print(ego.shape, gt_future_states.shape)
         return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
     
@@ -184,3 +202,83 @@ class DrivingData(Dataset):
                          X[...,3]*torch.cos(X[...,2]), 
                          X[...,3]*torch.sin(X[...,2])],dim = -1)
         return X #{'X':X,'u':u}
+    
+    def normalize_data(self, center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True):
+        # get the center and heading (local view)
+        # center, angle = self.current_xyh[:2], self.current_xyh[2]
+        # normalize agent trajectories
+        ego[:, :5] = agent_norm(ego, center, angle)
+        ground_truth[0] = agent_norm(ground_truth[0], center, angle) 
+
+        for i in range(neighbors.shape[0]):
+            if neighbors[i, -1, 0] != 0:
+                neighbors[i, :, :5] = agent_norm(neighbors[i], center, angle, impute=True)
+                ground_truth[i+1] = agent_norm(ground_truth[i+1], center, angle)            
+
+        # normalize map points
+        for i in range(map_lanes.shape[0]):
+            lanes = map_lanes[i]
+            crosswalks = map_crosswalks[i]
+
+            for j in range(map_lanes.shape[1]):
+                lane = lanes[j]
+                if lane[0][0] != 0:
+                    lane[:, :9] = map_norm(lane, center, angle)
+
+            for k in range(map_crosswalks.shape[1]):
+                crosswalk = crosswalks[k]
+                if crosswalk[0][0] != 0:
+                    crosswalk[:, :3] = map_norm(crosswalk, center, angle)
+        # normalize ref line
+        ref_line = ref_line_norm(ref_line, center, angle).astype(np.float32)
+
+        # visulization
+        if viz:
+            rect = plt.Rectangle((ego[-1, 0]-ego[-1, 5]/2, ego[-1, 1]-ego[-1, 6]/2), ego[-1, 5], ego[-1, 6], linewidth=2, color='r', alpha=0.6, zorder=3,
+                                transform=mpl.transforms.Affine2D().rotate_around(*(ego[-1, 0], ego[-1, 1]), ego[-1, 2]) + plt.gca().transData)
+            plt.gca().add_patch(rect)
+
+            plt.plot(ref_line[:, 0], ref_line[:, 1], 'y', linewidth=2, zorder=4)
+
+            future = ground_truth[0][ground_truth[0][:, 0] != 0]
+            plt.plot(future[:, 0], future[:, 1], 'r', linewidth=3, zorder=3)
+
+            for i in range(neighbors.shape[0]):
+                if neighbors[i, -1, 0] != 0:
+                    rect = plt.Rectangle((neighbors[i, -1, 0]-neighbors[i, -1, 5]/2, neighbors[i, -1, 1]-neighbors[i, -1, 6]/2), 
+                                          neighbors[i, -1, 5], neighbors[i, -1, 6], linewidth=2, color='m', alpha=0.6, zorder=3,
+                                          transform=mpl.transforms.Affine2D().rotate_around(*(neighbors[i, -1, 0], neighbors[i, -1, 1]), neighbors[i, -1, 2]) + plt.gca().transData)
+                    plt.gca().add_patch(rect)
+                    future = ground_truth[i+1][ground_truth[i+1][:, 0] != 0]
+                    plt.plot(future[:, 0], future[:, 1], 'm', linewidth=3, zorder=3)
+
+            for i in range(map_lanes.shape[0]):
+                lanes = map_lanes[i]
+                crosswalks = map_crosswalks[i]
+
+                for j in range(map_lanes.shape[1]):
+                    lane = lanes[j]
+                    if lane[0][0] != 0:
+                        centerline = lane[:, 0:2]
+                        centerline = centerline[centerline[:, 0] != 0]
+                        left = lane[:, 3:5]
+                        left = left[left[:, 0] != 0]
+                        right = lane[:, 6:8]
+                        right = right[right[:, 0] != 0]
+                        plt.plot(centerline[:, 0], centerline[:, 1], 'c', linewidth=3) # plot centerline
+                        plt.plot(left[:, 0], left[:, 1], 'k', linewidth=3) # plot left boundary
+                        plt.plot(right[:, 0], right[:, 1], 'k', linewidth=3) # plot left boundary
+
+                for k in range(map_crosswalks.shape[1]):
+                    crosswalk = crosswalks[k]
+                    if crosswalk[0][0] != 0:
+                        crosswalk = crosswalk[crosswalk[:, 0] != 0]
+                        plt.plot(crosswalk[:, 0], crosswalk[:, 1], 'b', linewidth=4) # plot crosswalk
+
+            plt.gca().set_aspect('equal')
+            plt.tight_layout()
+            plt.show(block=False)
+            plt.pause(1)
+            plt.close()
+
+        return ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
