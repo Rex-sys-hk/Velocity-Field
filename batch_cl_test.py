@@ -69,10 +69,22 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                 batch = []
                 for i in range(len(obs)):
                     batch.append(torch.from_numpy(obs[i]))
-                plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning)
-                plan_traj = plan_traj.cpu().numpy()[0]
-                prediction = prediction.cpu().numpy()[0]
-
+                if not args.gt_replay:
+                    plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning)
+                    plan_traj = plan_traj.cpu().numpy()[0]
+                    prediction = prediction.cpu().numpy()[0]
+                else:
+                    g_traj = simulator.sdc_route[simulator.timestep:simulator.timestep+51]
+                    current_pose = simulator.sdc_route[simulator.timestep]
+                    plan_traj = g_traj.copy()
+                    x = (g_traj[...,0]-current_pose[0])
+                    y = (g_traj[...,1]-current_pose[1])
+                    theta = -current_pose[2]
+                    plan_traj[...,0] = x*math.cos(theta) - y*math.sin(theta)
+                    plan_traj[...,1] = x*math.sin(theta) + y*math.cos(theta)
+                    plan_traj[...,2] = g_traj[...,2] - current_pose[2]
+                    # plan_traj = simulator.sdc_route[simulator.timestep+1:simulator.timestep+51]
+                    prediction = np.zeros([10,50,3])#simulator.sdc_prediction
                 # take one step
                 obs, done, info = simulator.step(plan_traj, prediction)
                 logging.info(f'Collision: {info[0]}, Off-route: {info[1]}, traffic_light: {info[2]}')
@@ -138,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument('--render', action="store_true", help='if render the scene (default: False)', default=False)
     parser.add_argument('--save', action="store_true", help='if save animation (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
+    parser.add_argument('--gt_replay', action="store_true", help='if replay ground truth (default: False)', default=False)
     args = parser.parse_args()
     cfg_file = args.config if args.config else 'config.yaml'
     os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)

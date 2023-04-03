@@ -56,10 +56,11 @@ class Simulator(DataProcess):
         
         # update sdc state
         velocity = (xy[0] - self.sdc_state[:2]) / 0.1
+        # will this heading similar to that of input? TODO
         heading = pi_2_pi(plan[0, 2]) + self.sdc_state[2]
         self.sdc_state = np.concatenate([xy[0], [heading], velocity, self.sdc_state[-3:]])
-        self.sdc_trajectory.append(self.sdc_state[:3])
-        self.sdc_gt_trajectory.append(self.sdc_route[self.timestep])
+        self.sdc_trajectory.append(self.sdc_state[:3]) # model past trajectory
+        self.sdc_gt_trajectory.append(self.sdc_route[self.timestep]) # ground truth trajectory
         self.sdc_hist_states = np.concatenate([self.sdc_hist_states[1:], np.expand_dims(self.sdc_state, 0)])
 
         # update neighbors states
@@ -183,7 +184,8 @@ class Simulator(DataProcess):
         if len(self.sdc_trajectory) < 100:
             repeated_last_point = np.repeat(sdc_trajectory[np.newaxis, -1], 100-sdc_trajectory.shape[0], axis=0)
             sdc_trajectory = np.append(sdc_trajectory, repeated_last_point, axis=0)
-
+        print(sdc_trajectory.shape)
+        print(self.sdc_route.shape)
         error = np.linalg.norm(sdc_trajectory[:100, :2] - np.array(self.sdc_route)[20:120, :2], axis=-1)
         human = self.calculate_dynamics(self.sdc_gt_trajectory)
 

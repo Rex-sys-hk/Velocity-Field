@@ -34,9 +34,12 @@ def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch,
         norm_gt_data = batch[5]
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
         # inference
-        plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
-        plan = plan.cpu()
-        prediction = prediction.cpu()
+        if not args.gt_replay:
+            plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
+            plan = plan.cpu()
+        else:
+            plan = norm_gt_data[:,0]
+            prediction = norm_gt_data[:,1:]
         # ground_truth = batch[5].to(args.device)
         # masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
         # # compute metrics
@@ -77,7 +80,7 @@ def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch,
         similarity_5s.extend(similarity[:, 49].cpu())
         # logging.info(f"Similarity@1s: {similarity[:,9].mean().cpu()}, Similarity@3s: {similarity[:,29].mean().cpu()}, Similarity@5s: {similarity[:,49].mean().cpu()}")
 
-        prediction_error = batch_check_prediction(prediction, norm_gt_data[:,1:])
+        prediction_error = batch_check_prediction(prediction[...,:3], norm_gt_data[:,1:])
         prediction_ADE.extend(prediction_error[0].cpu())
         prediction_FDE.extend(prediction_error[1].cpu())
         # logging.info(f"Prediction ADE: {prediction_error[0]}, FDE: {prediction_error[1]}")
@@ -131,6 +134,7 @@ if __name__ == "__main__":
     parser.add_argument('--use_planning', action="store_true", help='if use integrated planning module (default: False)', default=False)
     parser.add_argument('--render', action="store_true", help='if render the scenario (default: False)', default=False)
     parser.add_argument('--save', action="store_true", help='if save the rendered images (default: False)', default=False)
+    parser.add_argument('--gt_replay', action="store_true", help='if replay ground truth (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     args = parser.parse_args()
     os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
