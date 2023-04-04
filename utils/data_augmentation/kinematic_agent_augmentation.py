@@ -1,6 +1,6 @@
 import logging
 from typing import Any, List, Optional, Tuple, TypeVar, cast
-
+import copy
 import numpy as np
 import torch
 from model.planner import get_sample
@@ -63,7 +63,7 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         """Inherited, see superclass."""
         if np.random.rand() >= self._augment_prob:
             return features, targets
-
+        gt_feature = copy.deepcopy(features)
         # Perturb the current position
         # augment the last frame of ego history and future
         # last time step only
@@ -75,7 +75,7 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         ego_his = torch.cat([ego_his, v],dim=-1)
         context = {'init_guess_u': get_u_from_X(ego_his[:,1:], ego_his[:,0]),
                    'current_state': ego_his[:,0:1]}
-        aug_his = get_sample(context, cov = torch.tensor([2.,2.]), sample_num=1, turb_num=19)
+        aug_his = get_sample(context, cov = torch.tensor([.5,.2]), sample_num=1, turb_num=19)
         features['agents'].ego[:,1:] = aug_his['X'][:,0,:,:3].numpy()
         
 
@@ -95,12 +95,12 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         try:
             sol = self._optimizer.solve()
         except RuntimeError:
-            logger.error("Smoothing failed with status %s! Use G.T. instead" % sol.stats()['return_status'])
-            return features, targets
+            logger.error("Smoothing failed with status %s! Use G.T. instead" )
+            return gt_feature, targets
 
         if not sol.stats()['success']:
             logger.warning("Smoothing failed with status %s! Use G.T. instead" % sol.stats()['return_status'])
-            return features, targets
+            return gt_feature, targets
 
         ego_perturb: List[np.float32] = np.vstack(
             [

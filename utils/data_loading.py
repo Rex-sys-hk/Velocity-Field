@@ -206,12 +206,12 @@ class DrivingData(Dataset):
     def normalize_data(self, center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True):
         # get the center and heading (local view)
         # center, angle = self.current_xyh[:2], self.current_xyh[2]
-        print('cu_center:', center, 'cu_angle:',angle)
         # normalize agent trajectories
-        print('before normed:', ego[-1], '\n', ground_truth[0,0])
+        # print('cu_center:', center, 'cu_angle:',angle)
+        # print('before normed:', ego[-1], '\n', ground_truth[0,0])
         ego[:, :5] = agent_norm(ego, center, angle)
         ground_truth[0] = agent_norm(ground_truth[0], center, angle) 
-        print('normed:', ego[-1], '\n', ground_truth[0,0])
+        # print('normed:', ego[-1], '\n', ground_truth[0,0])
         for i in range(neighbors.shape[0]):
             if neighbors[i, -1, 0] != 0:
                 neighbors[i, :, :5] = agent_norm(neighbors[i], center, angle, impute=True)
