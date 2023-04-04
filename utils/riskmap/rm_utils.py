@@ -668,9 +668,7 @@ def load_cfg_here():
 #     sl = torch.stack([s, l], dim=-1)
 #     return sl
 
-def get_u_from_X(X, init_state):
-    L = WB
-    dt = 0.1
+def get_u_from_X(X, init_state, dt = 0.1, L = WB):
     # extend fut_traj
     _X = torch.cat([init_state[...,:5].unsqueeze(-2),X[...,:5]],dim = -2)
     v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]

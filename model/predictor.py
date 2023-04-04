@@ -337,6 +337,7 @@ class VectorField(nn.Module):
                             torch.sin(traj[...,2])*traj[...,3]],
                             dim=-1)
         diff = traj_xy - dx_dy
+        diff = diff**2
         return diff
     
 # Build predictor

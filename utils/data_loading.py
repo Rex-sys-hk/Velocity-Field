@@ -64,8 +64,8 @@ class DrivingData(Dataset):
             (ego, neighbors, 
              map_lanes, map_crosswalks, 
              ref_line, gt_future_states) = self.normalize_data(
-                                                                ego[-1,:2],
-                                                                ego[-1,2],
+                                                                ego[-1,:2].copy(),
+                                                                ego[-1,2].copy(),
                                                                 ego,
                                                                 neighbors,
                                                                 map_lanes,
@@ -207,9 +207,11 @@ class DrivingData(Dataset):
         # get the center and heading (local view)
         # center, angle = self.current_xyh[:2], self.current_xyh[2]
         # normalize agent trajectories
+        # print('cu_center:', center, 'cu_angle:',angle)
+        # print('before normed:', ego[-1], '\n', ground_truth[0,0])
         ego[:, :5] = agent_norm(ego, center, angle)
         ground_truth[0] = agent_norm(ground_truth[0], center, angle) 
-
+        # print('normed:', ego[-1], '\n', ground_truth[0,0])
         for i in range(neighbors.shape[0]):
             if neighbors[i, -1, 0] != 0:
                 neighbors[i, :, :5] = agent_norm(neighbors[i], center, angle, impute=True)
@@ -237,11 +239,11 @@ class DrivingData(Dataset):
             rect = plt.Rectangle((ego[-1, 0]-ego[-1, 5]/2, ego[-1, 1]-ego[-1, 6]/2), ego[-1, 5], ego[-1, 6], linewidth=2, color='r', alpha=0.6, zorder=3,
                                 transform=mpl.transforms.Affine2D().rotate_around(*(ego[-1, 0], ego[-1, 1]), ego[-1, 2]) + plt.gca().transData)
             plt.gca().add_patch(rect)
-
+            plt.plot(ego[...,0], ego[...,1], 'r', marker = '.', lw=1, zorder=3)
             plt.plot(ref_line[:, 0], ref_line[:, 1], 'y', linewidth=2, zorder=4)
 
             future = ground_truth[0][ground_truth[0][:, 0] != 0]
-            plt.plot(future[:, 0], future[:, 1], 'r', linewidth=3, zorder=3)
+            plt.plot(future[:, 0], future[:, 1], 'r', marker = '.', linewidth=1, zorder=3)
 
             for i in range(neighbors.shape[0]):
                 if neighbors[i, -1, 0] != 0:
@@ -277,8 +279,9 @@ class DrivingData(Dataset):
 
             plt.gca().set_aspect('equal')
             plt.tight_layout()
-            plt.show(block=False)
-            plt.pause(1)
-            plt.close()
+            plt.show()
+            # plt.show(block=False)
+            # plt.pause(1)
+            # plt.close()
 
         return ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth

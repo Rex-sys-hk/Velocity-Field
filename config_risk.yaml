@@ -18,7 +18,7 @@ planner:
 
   meter2risk: 
     name: 'CostModelTV'
-    V_dim: 3
+    V_dim: 8
     th: 50
     # input_shape: 256
     # idv: True
