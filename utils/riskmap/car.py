@@ -7,6 +7,8 @@ author: Zheng Zh (@Zhengzh)
 """
 
 from math import cos, sin, tan, pi
+from typing import List
+import threading
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
@@ -252,6 +254,64 @@ def physical_model(control, current_state, dt=0.1):
     traj = torch.stack([x, y, theta, v], dim=-1)
 
     return traj
+
+from utils.data_augmentation.data_augmentation_util import ConstrainedNonlinearSmoother
+_optimizer = ConstrainedNonlinearSmoother(50, 0.1)
+
+def traj_smooth(fut_traj:np.ndarray, init_state:np.ndarray):
+    """_summary_
+    dt = 0.1
+    th = 50
+    Args:
+        ego_trajectory (np.ndarray): [th,(x,y,yaw...)]
+        init_state (np.ndarray): [1,(x,y,yaw...)]
+
+    Returns:
+        _type_: _description_
+    """
+    ego_trajectory = np.concatenate([init_state[...,:3], fut_traj[...,:3]], axis=-2)
+    ego_x, ego_y, ego_yaw = ego_trajectory.T
+    ego_velocity = np.linalg.norm(np.diff(ego_trajectory[:, :2], axis=0), axis=1)/0.1 # didn't divided by dt before
+
+    # Define the 'current state' as a boundary condition, and reference trajectory
+    x_curr = [ego_x[0], ego_y[0], ego_yaw[0], ego_velocity[0]]
+    ref_traj = ego_trajectory
+
+    # Set reference and solve
+    _optimizer.set_reference_trajectory(x_curr, ref_traj)
+
+    try:
+        sol = _optimizer.solve()
+    except RuntimeError:
+        logging.info("Smoothing failed! Use G.T. instead" )
+        return fut_traj
+
+    if not sol.stats()['success']:
+        logging.info(f"Smoothing failed with status {sol.stats()['return_status']}! Use G.T. instead")
+        return fut_traj
+    ego_smoothed: List[np.float32] = np.vstack(
+        [
+            sol.value(_optimizer.position_x),
+            sol.value(_optimizer.position_y),
+            sol.value(_optimizer.yaw),
+        ]
+    )
+    ego_smoothed = ego_smoothed.T
+    fut_traj[...,:3] = ego_smoothed[1:,:]
+    # fut_traj[...,3:5] = np.diff(ego_smoothed, axis=-2)/0.1
+    return fut_traj
+
+class TrajSmooth(threading.Thread):
+    def __init__(self, fut_traj, init_state) -> None:
+        super().__init__()
+        self.fut_traj = fut_traj
+        self.init_state = init_state
+        
+    def run(self):
+        self.fut_traj = traj_smooth(self.fut_traj, self.init_state)
+
+def traj_smooth_mp(fut,init,dict,i):
+    dict[i] = traj_smooth(fut,init)
 
 def main():
     x, y, yaw = 0., 0., 1.

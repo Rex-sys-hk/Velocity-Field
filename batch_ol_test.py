@@ -26,17 +26,16 @@ def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch,
     predictor.eval()
     for batch in tqdm(data_loader):
         # prepare data
-        ego = batch[0]
-        neighbors = batch[1]
+        ego = batch[0].to(args.device)
+        neighbors = batch[1].to(args.device)
         # map_lanes = batch[2]
         # map_crosswalks = batch[3]
-        ref_line = batch[4]
-        norm_gt_data = batch[5]
-        current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
+        ref_line = batch[4].to(args.device)
+        norm_gt_data = batch[5].to(args.device)
+        current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1].to(args.device)
         # inference
         if not args.gt_replay:
             plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
-            plan = plan.cpu()
         else:
             plan = norm_gt_data[:,0]
             prediction = norm_gt_data[:,1:]
@@ -147,5 +146,9 @@ if __name__ == "__main__":
     
     log_dir=os.path.join(f'testing_log/{args.name}')
     os.makedirs(log_dir,exist_ok=True)
+    try:
+        args.device=args.local_rank if args.local_rank else args.device
+    except:
+        pass
 
     op_test()

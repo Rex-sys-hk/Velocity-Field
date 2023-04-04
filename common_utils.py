@@ -8,9 +8,10 @@ Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查�
 '''
 import torch
 import numpy as np
+import multiprocessing
 from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre, STCostMap
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
-from utils.riskmap.car import bicycle_model, pi_2_pi
+from utils.riskmap.car import bicycle_model, pi_2_pi, traj_smooth, TrajSmooth, traj_smooth_mp
 from utils.train_utils import select_future
 predictor_selection = {'base': BasePre,
                        'dipp': Predictor,
@@ -77,7 +78,7 @@ def init_planner(args, cfg, predictor):
         planner = None
     return planner
 
-def inference(batch, predictor, planner, args, use_planning, distributed=False):
+def inference(batch, predictor, planner, args, use_planning, distributed=False, parallel='mt'):
     try:
         args.device=args.local_rank if args.local_rank else args.device
     except:
@@ -161,7 +162,33 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False):
         # plan loss
         with torch.no_grad():
             plan, _ = planner.plan(planner_inputs) # control
-
+    plan = plan.cpu().numpy()
+    c_state = current_state.cpu().numpy()
+    threads = []
+    if parallel=='mp':
+        ## multiprocess 114*80 5:23
+        manager = multiprocessing.Manager()
+        return_dict = manager.dict()
+        for i in range(plan.shape[0]):
+            p = multiprocessing.Process(target=traj_smooth_mp,args = (plan[i], c_state[i,0:1], return_dict, i))
+            threads.append(p)
+            p.start()
+        for i in range(plan.shape[0]):
+            threads[i].join()
+            plan[i] = return_dict[i]
+    if parallel=='mt':
+        ## multithreads 144*80 6:55
+        for i in range(plan.shape[0]):
+            threads.append(TrajSmooth(plan[i], c_state[i,0:1]))
+            threads[i].start()
+        for i in range(plan.shape[0]):
+            threads[i].join()
+            plan[i] = threads[i].fut_traj
+    if parallel=='single':
+        ## single threads 144*80 6:46
+        for i in range(plan.shape[0]):
+            plan[i] = traj_smooth(plan[i], c_state[i,0:1])
+    plan = torch.tensor(plan,device=prediction.device)
     return plan, prediction
 
 def cellect_results(results):

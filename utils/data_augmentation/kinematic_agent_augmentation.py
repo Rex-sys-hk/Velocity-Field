@@ -75,7 +75,7 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         ego_his = torch.cat([ego_his, v],dim=-1)
         context = {'init_guess_u': get_u_from_X(ego_his[:,1:], ego_his[:,0]),
                    'current_state': ego_his[:,0:1]}
-        aug_his = get_sample(context, cov = torch.tensor([.5,.2]), sample_num=1, turb_num=19)
+        aug_his = get_sample(context, cov = torch.tensor([.5,.5]), sample_num=1, turb_num=19)
         features['agents'].ego[:,1:] = aug_his['X'][:,0,:,:3].numpy()
         
 

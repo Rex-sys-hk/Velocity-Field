@@ -183,8 +183,6 @@ class Simulator(DataProcess):
         if len(self.sdc_trajectory) < 100:
             repeated_last_point = np.repeat(sdc_trajectory[np.newaxis, -1], 100-sdc_trajectory.shape[0], axis=0)
             sdc_trajectory = np.append(sdc_trajectory, repeated_last_point, axis=0)
-        print(sdc_trajectory.shape)
-        print(self.sdc_route.shape)
         error = np.linalg.norm(sdc_trajectory[:100, :2] - np.array(self.sdc_route)[20:120, :2], axis=-1)
         human = self.calculate_dynamics(self.sdc_gt_trajectory)
 
