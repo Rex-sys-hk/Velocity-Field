@@ -95,11 +95,11 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         try:
             sol = self._optimizer.solve()
         except RuntimeError:
-            logger.error("Smoothing failed with status %s! Use G.T. instead" )
+            logger.info("Smoothing failed! Use G.T. instead" )
             return gt_feature, targets
 
         if not sol.stats()['success']:
-            logger.warning("Smoothing failed with status %s! Use G.T. instead" % sol.stats()['return_status'])
+            logger.info(f"Smoothing failed with status {sol.stats()['return_status']}! Use G.T. instead")
             return gt_feature, targets
 
         ego_perturb: List[np.float32] = np.vstack(

@@ -107,15 +107,14 @@ class DrivingData(Dataset):
         # plt.plot(aug_targets['trajectory'].data[:,0], aug_targets['trajectory'].data[:,1], 'b')
         # plt.show()
         aug_ego = aug_features['agents'].ego[0]
-        v = np.linalg.norm(np.diff(aug_ego[...,:2],axis=0),axis=-1)
+        v = np.diff(aug_ego[...,:2],axis=-2)/0.1
         v = np.pad(v, (1,0), 'edge')
-        aug_ego = np.concatenate([aug_features['agents'].ego[0],(v*np.cos(aug_ego[...,2]))[:, None], (v*np.sin(aug_ego[...,2]))[:, None]],axis=-1)
-        # aug_ego = yawv2yawdxdy(aug_ego)
+        aug_ego = np.concatenate([aug_features['agents'].ego[0],v[:, 0:1], v[:, 1:2]],axis=-1)
+
         aug_gt = aug_targets['trajectory'].data
-        aug_v = np.linalg.norm(np.diff(aug_gt[...,:2],axis=0),axis=-1)
-        aug_v = np.pad(aug_v, (1,0), 'edge')
-        aug_gt = np.concatenate([aug_targets['trajectory'].data,(aug_v*np.cos(aug_gt[...,2]))[:, None], (aug_v*np.sin(aug_gt[...,2]))[:, None]],axis=-1)
-        # aug_gt = yawv2yawdxdy(aug_gt)
+        ext_aug_gt = np.concatenate([aug_ego[-1:,:3], aug_gt],axis=-2)
+        aug_v = np.diff(ext_aug_gt[...,:2],axis=-2)/0.1
+        aug_gt = np.concatenate([aug_targets['trajectory'].data,aug_v[:, 0:1], aug_v[:, 1:2]],axis=-1)
         size = np.concatenate([ego[-1,None,5:],neighbors[-1,:,5:8]],axis=0)
         if batch_check_collision(torch.tensor(aug_gt[None,:,:]), torch.tensor(gt[None,1:,:,:3]), torch.tensor(size[None,:])):
             return ego[...,:5], gt[0,:,:5]

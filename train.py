@@ -77,7 +77,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         ## EULA
         elif planner.name=='esp':
@@ -151,7 +151,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
             plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
-            plan_loss += F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            # plan_loss += 2*F.smooth_l1_loss(plan[:, 0], ground_truth[:, 0, 0, :3]) # SDE
             loss += plan_loss
         # loss backward
         loss.backward()
@@ -183,10 +184,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 plt.axis('equal')
                 
             ## general output
+            # ego history
+            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), color = 'g', marker = '.', lw=0.2, label='history')
             # reference lane
-            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), lw=1, label='reflane')
+            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=1, label='reflane')
             # result
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(),color = 'orange', lw=2,label='plan result')
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.', lw=1, label='plan result')
             # ground truth
             plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=1,label='GT')
             for mod in plan_trajs[0].cpu().detach():
@@ -224,7 +227,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
-    logging.info(f'\n>>>plannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
+    print(f'\n>>>plannerADE: {plannerADE:.4f}, plannerFDE: {plannerFDE:.4f}, predictorADE: {predictorADE:.4f}, predictorFDE: {predictorFDE:.4f}')
     if args.local_rank==0 or not distributed:
         tbwriter.add_scalar('train/'+'epoch_loss', np.mean(epoch_loss), epoch)
         tbwriter.add_scalar('train/'+'plannerADE', np.mean(plannerADE), epoch)
@@ -265,7 +268,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, d
     plannerADE, plannerFDE = np.mean(epoch_metrics[:, 0]), np.mean(epoch_metrics[:, 1])
     predictorADE, predictorFDE = np.mean(epoch_metrics[:, 2]), np.mean(epoch_metrics[:, 3])
     epoch_metrics = [plannerADE, plannerFDE, predictorADE, predictorFDE]
-    logging.info(f'\n==val-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
+    print(f'\n==val-plannerADE: {plannerADE:.4f}, val-plannerFDE: {plannerFDE:.4f}, val-predictorADE: {predictorADE:.4f}, val-predictorFDE: {predictorFDE:.4f}')
     if args.local_rank==0 or not distributed:
         tbwriter.add_scalar('valid/'+'plannerADE', np.mean(plannerADE), epoch)
         tbwriter.add_scalar('valid/'+'plannerFDE', np.mean(plannerFDE), epoch)
@@ -436,5 +439,5 @@ if __name__ == "__main__":
     )
     # torch.autograd.set_detect_anomaly(False)
     torch.cuda.empty_cache() 
-    # logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.ERROR)
     model_training()
