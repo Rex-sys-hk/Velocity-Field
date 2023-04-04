@@ -276,5 +276,5 @@ class Simulator(DataProcess):
     
     def save_animation(self, path='.'):
         anim = self.create_animation(self.scene_imgs)
-        anim.save(path+f'{self.scenario_id}.mp4')
+        anim.save(path+f'/{self.scenario_id}.mp4')
     

@@ -739,11 +739,11 @@ def risk_cost_function_sample(control_variables, current_state, predictions, ref
     _predictions = TmpContainer(predictions)
     _ref_line = TmpContainer(ref_line)
     measure = {
-        # 'speed':_speed([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
-        # 'acceleration':_acceleration([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
-        # 'jerk':_jerk([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
-        # 'steering':_steering([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
-        # 'steering_change':_steering_change([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'speed':_speed([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'acceleration':_acceleration([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'jerk':_jerk([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'steering':_steering([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        'steering_change':_steering_change([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         # 'lane_xy':_lane_xy([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         # 'lane_theta':_lane_theta([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         'safety':_safety([_control_variables],[_predictions, _current_state, _ref_line]).unsqueeze(-1),
