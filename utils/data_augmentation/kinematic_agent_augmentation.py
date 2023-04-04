@@ -2,6 +2,8 @@ import logging
 from typing import Any, List, Optional, Tuple, TypeVar, cast
 
 import numpy as np
+import torch
+from model.planner import get_sample
 # from nuplan_utils.abstract_scenario import AbstractScenario
 from utils.data_augmentation.abstract_data_augmentation import (AbstractAugmentor,
                                         FeaturesType, 
@@ -13,6 +15,7 @@ from utils.data_augmentation.data_augmentation_util import (
     ScalingDirection,
     UniformNoise,
 )
+from utils.riskmap.rm_utils import get_u_from_X
 # from nuplan.planning.training.modeling.types import FeaturesType, TargetsType
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,7 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         self._random_offset_generator = UniformNoise(low, high) if use_uniform_noise else GaussianNoise(mean, std)
         self._augment_prob = augment_prob
         self._optimizer = ConstrainedNonlinearSmoother(trajectory_length, dt)
+        self.dt = dt
 
     def augment(
         self, features: FeaturesType, targets: TargetsType, scenario = None
@@ -62,13 +66,24 @@ class KinematicAgentAugmentor(AbstractAugmentor):
 
         # Perturb the current position
         # augment the last frame of ego history and future
-        features['agents'].ego[0][-1] += self._random_offset_generator.sample()
+        # last time step only
+        # features['agents'].ego[0][-1] += self._random_offset_generator.sample()
+        # all time steps
+        ego_his = torch.tensor(features['agents'].ego)
+        v = torch.diff(ego_his,dim=-2)/self.dt
+        v = torch.cat([v[:,0:1], v], dim=-2) # padding
+        ego_his = torch.cat([ego_his, v],dim=-1)
+        context = {'init_guess_u': get_u_from_X(ego_his[:,1:], ego_his[:,0]),
+                   'current_state': ego_his[:,0:1]}
+        aug_his = get_sample(context, cov = torch.tensor([2.,2.]), sample_num=1, turb_num=19)
+        features['agents'].ego[:,1:] = aug_his['X'][:,0,:,:3].numpy()
+        
 
         ego_trajectory = np.concatenate(
-            [features['agents'].ego[0][-1:, :], targets['trajectory'].data]
+            [features['agents'].ego[0][-1:, :3], targets['trajectory'].data]
         )
         ego_x, ego_y, ego_yaw = ego_trajectory.T
-        ego_velocity = np.linalg.norm(np.diff(ego_trajectory[:, :2], axis=0), axis=1)
+        ego_velocity = np.linalg.norm(np.diff(ego_trajectory[:, :2], axis=0), axis=1)/self.dt # didn't divided by dt brefore
 
         # Define the 'current state' as a boundary condition, and reference trajectory
         x_curr = [ego_x[0], ego_y[0], ego_yaw[0], ego_velocity[0]]
