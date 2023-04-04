@@ -159,7 +159,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)
         optimizer.step()
         # compute metrics
-        if tb_iters%300==0:
+        if tb_iters%args.img_log_interval==0:
             matplotlib.use('Agg')
             plt.title(f'{args.name}')
             plt.autoscale(False)
@@ -201,7 +201,6 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.xlim(-20,100)
             plt.ylim(-40,40)
             plt.legend()
-            # plt.show()
             plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
             plt.close()
             plt.figure()
@@ -424,6 +423,7 @@ if __name__ == "__main__":
         "-c", "--config", help="Config file with dataset parameters", required=False, default=None, type=str)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
+    parser.add_argument("--img_log_interval", type=int, default=100)
 
     args = parser.parse_args()
     distributed = False
