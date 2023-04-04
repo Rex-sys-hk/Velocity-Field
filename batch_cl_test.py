@@ -123,7 +123,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
 
             # save animation
             if args.save:
-                simulator.save_animation(os.path.join(log_path,'video'))
+                simulator.save_animation(os.path.join(log_path,'video/'))
 
     # save metircs
     data={'collision':collisions, 'off_route':off_routes, 'traffic_light':traffic_light,
