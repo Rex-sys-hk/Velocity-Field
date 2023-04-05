@@ -50,14 +50,10 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
         # predict
         optimizer.zero_grad()
-        plans_ori, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        # clip control range
-        max_a = 5
-        max_s = 0.6
-        plans = plans_ori.clone()
-        plans[...,0] = plans_ori[...,0].clamp(-max_a,max_a)
-        plans[...,1] = plans_ori[...,1].clamp(-max_s,max_s)
-        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(cfg['model_cfg']['mode_num'])], dim=1)
+        # plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        # plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(cfg['model_cfg']['mode_num'])], dim=1)
+        plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plans = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1)
         loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
         # plan
         if not use_planning:
@@ -82,8 +78,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan = bicycle_model(u, ego[:, -1])[:, :, :3]
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+            plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) 
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         ## EULA
         elif planner.name=='esp':
@@ -92,8 +88,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u, ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[..., :3], ground_truth[:, 0, :, :3]) 
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
+            plan_loss = F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) 
+            plan_loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,...,:2], ground_truth[:, 0, -1, :2])
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -113,8 +109,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -138,8 +134,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -156,9 +152,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :2]) # ADE
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :2]) # FDE
             # plan_loss += 2*F.smooth_l1_loss(plan[:, 0], ground_truth[:, 0, 0, :3]) # SDE
+            # print(ego[0,-2:])
+            # print(ground_truth[0, 0, 0, :3])
+            # print(plans[0,torch.argmax(best_mode[0]),0])
+            # print(plan[0,0])
             loss += plan_loss
         # loss backward
         loss.backward()

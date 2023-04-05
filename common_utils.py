@@ -12,6 +12,7 @@ import multiprocessing
 from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre, STCostMap
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
 from utils.riskmap.car import bicycle_model, pi_2_pi, traj_smooth, TrajSmooth, traj_smooth_mp
+from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
 from utils.train_utils import select_future
 predictor_selection = {'base': BasePre,
                        'dipp': Predictor,
@@ -90,8 +91,11 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
     ref_line_info = batch[4].to(args.device)
     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
     with torch.no_grad():
-        plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(scores.shape[1])], dim=1)
+        # plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        # plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(scores.shape[1])], dim=1)
+        cfg = load_cfg_here()
+        plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plans = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1)
 
     if not use_planning:
         plan, prediction = select_future(plan_trajs, predictions, scores)

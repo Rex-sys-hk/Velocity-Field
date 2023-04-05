@@ -667,8 +667,16 @@ def load_cfg_here():
 #     l = torch.sign((y-y_r)*torch.cos(theta_r)-(x-x_r)*torch.sin(theta_r)) * torch.sqrt(torch.square(x-x_r)+torch.square(y-y_r))
 #     sl = torch.stack([s, l], dim=-1)
 #     return sl
+def get_yawv_from_pos(pos, init_state, dt = 0.1):
+    # get yaw, dx, dy from [[X,Y]]
+    _pos = torch.cat([init_state[...,:2].unsqueeze(-2),pos[...,:2]],dim = -2)
+    v = torch.diff(_pos, dim=-2)/dt
+    yaw = torch.atan2(v[...,1:2],v[...,0:1])
+    return torch.cat([pos[...,:2],yaw,v],dim=-1)
 
 def get_u_from_X(X, init_state, dt = 0.1, L = WB):
+    if X.shape[-1] != 5:
+        X = get_yawv_from_pos(X, init_state, dt = dt)
     # extend fut_traj
     _X = torch.cat([init_state[...,:5].unsqueeze(-2),X[...,:5]],dim = -2)
     v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]
