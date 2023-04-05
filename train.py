@@ -82,8 +82,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan = bicycle_model(u, ego[:, -1])[:, :, :3]
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) 
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3])
+            plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) 
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2])
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         ## EULA
         elif planner.name=='esp':
@@ -92,8 +92,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u, ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[..., :3], ground_truth[:, 0, :, :3]) 
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :3], ground_truth[:, 0, -1, :3])
+            loss += F.smooth_l1_loss(init_guess[..., :2], ground_truth[:, 0, :, :2]) 
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :2], ground_truth[:, 0, -1, :2])
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -113,8 +113,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -138,8 +138,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:3], ground_truth[:, 0, :, :3]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:3], ground_truth[:, 0, -1, :3]) # FDE
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -156,8 +156,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='base':
             # not choosing the nearest, but highest score one
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
-            plan_loss = F.smooth_l1_loss(plan, ground_truth[:, 0, :, :3]) # ADE
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1], ground_truth[:, 0, -1, :3]) # FDE
+            plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2]) # FDE
             # plan_loss += 2*F.smooth_l1_loss(plan[:, 0], ground_truth[:, 0, 0, :3]) # SDE
             loss += plan_loss
         # loss backward
