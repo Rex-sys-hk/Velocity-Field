@@ -50,7 +50,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
         # predict
         optimizer.zero_grad()
-        plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plans_ori, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        # clip control range
+        max_a = 5
+        max_s = 0.6
+        plans = plans_ori.clone()
+        plans[...,0] = plans_ori[...,0].clamp(-max_a,max_a)
+        plans[...,1] = plans_ori[...,1].clamp(-max_s,max_s)
         plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(cfg['model_cfg']['mode_num'])], dim=1)
         loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
         # plan
@@ -160,7 +166,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         optimizer.step()
         # compute metrics
         if tb_iters%args.img_log_interval==0:
-            matplotlib.use('Agg')
+            if not args.imm_show:
+                matplotlib.use('Agg')
             plt.title(f'{args.name}')
             plt.autoscale(False)
             ## special output
@@ -185,13 +192,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 
             ## general output
             # ego history
-            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), color = 'g', marker = '.', lw=0.2, label='history')
+            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), color = 'g', marker = '.',  markersize=0.6, lw=0.2, zorder=1,label='history')
             # reference lane
-            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=1, label='reflane')
+            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=3, zorder=0, label='reflane')
             # result
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.', lw=1, label='plan result')
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.',  markersize=0.8, lw=0.4, zorder=4,label='plan result')
             # ground truth
-            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=1,label='GT')
+            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', lw=1, zorder=4, label='GT')
             for mod in plan_trajs[0].cpu().detach():
                 plt.plot(mod[...,0], mod[...,1],'cyan',lw=0.5)
             # prediction_t = prediction*masks
@@ -201,6 +208,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plt.xlim(-20,100)
             plt.ylim(-40,40)
             plt.legend()
+            if args.imm_show:
+                plt.show()
             plt.savefig(f'training_log/{args.name}/images/model_{tb_iters}.png',dpi=400)
             plt.close()
             plt.figure()
@@ -249,7 +258,7 @@ def valid_epoch(data_loader, predictor, planner: Planner, use_planning, epoch, d
     for it, batch in enumerate(data_loader):
         tb_iters+=1
         # prepare data
-        plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
+        plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed, parallel='none')
         ground_truth = batch[5].to(args.local_rank)
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0)
         # compute metrics
@@ -424,6 +433,7 @@ if __name__ == "__main__":
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--img_log_interval", type=int, default=100)
+    parser.add_argument('--imm_show', action="store_true", help='if show image immediately', default=False)
 
     args = parser.parse_args()
     distributed = False
@@ -438,7 +448,7 @@ if __name__ == "__main__":
     tbwriter = SummaryWriter(
     log_dir=os.path.join(f'training_log/{args.name}', 'tensorboard_logs')
     )
-    # torch.autograd.set_detect_anomaly(False)
+    torch.autograd.set_detect_anomaly(False)
     torch.cuda.empty_cache() 
     logging.basicConfig(level=logging.ERROR)
     model_training()

@@ -11,9 +11,9 @@ planner:
   cost_items: 3
   time_horizon: 50 # same as future_steps
 
-  cov_base: [0.5, 0.2]
+  cov_base: [0.2, 0.1]
   cov_inc: [0., 0.] #1.e-4
-  const_turb: False
+  const_turb: True
   gt_sample_num: 30
   plan_sample_num: 200
 

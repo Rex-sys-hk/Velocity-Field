@@ -65,7 +65,7 @@ def closed_loop_test():
                 batch = []
                 for i in range(len(obs)):
                     batch.append(torch.from_numpy(obs[i]))
-                plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning)
+                plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning, parallel='single')
                 plan_traj = plan_traj.cpu().numpy()[0]
                 prediction = prediction.cpu().numpy()[0]
 

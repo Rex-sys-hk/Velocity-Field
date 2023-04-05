@@ -16,7 +16,7 @@ from model.meter2risk import Meter2Risk
 from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
-def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.2]), sample_num=100, turb_num=1):
+def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=100, turb_num=1):
     btsz = context['init_guess_u'].shape[0]
     cov = cov.to(context['init_guess_u'].device)
     init_guess_u = context['init_guess_u'] if gt_u==None else gt_u
@@ -93,7 +93,7 @@ class EularSamplingPlanner(Planner):
         self.device = device
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
         self.cost_function_weights = meter2risk
-        self.cov_base = torch.tensor([0.1, 0.005])
+        self.cov_base = torch.tensor([0.2, 0.1])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.turb_num = 50
         

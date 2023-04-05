@@ -96,7 +96,7 @@ def open_loop_test():
                 #     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
                 #     norm_gt_data = data['gt_future_states']
                 #     batch = [ego,neighbors,lanes,crosswalks,ref_line]
-                plan, prediction = inference(batch, predictor, planner, args, args.use_planning)
+                plan, prediction = inference(batch, predictor, planner, args, args.use_planning, parallel='none')
                 plan = plan.cpu().numpy()[0]
 
                 # compute metrics

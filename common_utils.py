@@ -78,7 +78,7 @@ def init_planner(args, cfg, predictor):
         planner = None
     return planner
 
-def inference(batch, predictor, planner, args, use_planning, distributed=False, parallel='mt'):
+def inference(batch, predictor, planner, args, use_planning, distributed=False, parallel='none'):
     try:
         args.device=args.local_rank if args.local_rank else args.device
     except:
@@ -162,10 +162,12 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         # plan loss
         with torch.no_grad():
             plan, _ = planner.plan(planner_inputs) # control
+    if parallel=='none':
+        return plan, prediction
     plan = plan.cpu().numpy()
     c_state = current_state.cpu().numpy()
     threads = []
-    if parallel=='mp':
+    if parallel=='mp' and plan.shape[0]>1:
         ## multiprocess 114*80 5:23
         manager = multiprocessing.Manager()
         return_dict = manager.dict()
@@ -176,7 +178,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         for i in range(plan.shape[0]):
             threads[i].join()
             plan[i] = return_dict[i]
-    if parallel=='mt':
+    if parallel=='mt' and plan.shape[0]>1:
         ## multithreads 144*80 6:55
         for i in range(plan.shape[0]):
             threads.append(TrajSmooth(plan[i], c_state[i,0:1]))
@@ -184,7 +186,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         for i in range(plan.shape[0]):
             threads[i].join()
             plan[i] = threads[i].fut_traj
-    if parallel=='single':
+    if parallel=='single' or plan.shape[0]<=1:
         ## single threads 144*80 6:46
         for i in range(plan.shape[0]):
             plan[i] = traj_smooth(plan[i], c_state[i,0:1])

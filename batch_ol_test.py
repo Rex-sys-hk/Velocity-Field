@@ -35,7 +35,7 @@ def batch_op_test(data_loader, predictor, planner: Planner, use_planning, epoch,
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1].to(args.device)
         # inference
         if not args.gt_replay:
-            plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed)
+            plan, prediction = inference(batch, predictor, planner, args, use_planning, distributed=distributed, parallel='none')
         else:
             plan = norm_gt_data[:,0]
             prediction = norm_gt_data[:,1:]
