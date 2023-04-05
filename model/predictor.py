@@ -338,6 +338,7 @@ class VectorField(nn.Module):
                             dim=-1)
         diff = traj_xy - dx_dy
         diff = diff**2
+        diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
         return diff
     
 # Build predictor

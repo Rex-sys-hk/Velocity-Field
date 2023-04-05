@@ -857,34 +857,39 @@ class SimpleCostCoef(Meter2Risk):
 class CostModelTV(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
+        # self.coeff = nn.Sequential(
+        #                 nn.Linear(self.th*self.V_dim,128),
+        #                 nn.GELU(),
+        #                 nn.Linear(128,128),
+        #                 nn.Dropout(0.1),
+        #                 nn.GELU(),
+        #                 nn.Linear(128,self.th*self.V_dim),
+        #                 ).to(device)
         self.coeff = nn.Sequential(
-                        nn.Linear(self.th*self.V_dim,128),
-                        nn.GELU(),
-                        nn.Linear(128,128),
-                        nn.Dropout(0.1),
-                        nn.GELU(),
-                        nn.Linear(128,self.th*self.V_dim),
+                        nn.Linear(self.th*self.V_dim,self.th*self.V_dim),
                         ).to(device)
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
         risk = self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
-        risk = torch.nn.functional.normalize(risk,dim=1)
+        # risk = torch.nn.functional.normalize(risk,dim=1)
         return risk
     
 class CostModel(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
+        # self.coeff = nn.Sequential(
+        #                 nn.Linear(1*self.V_dim,128),
+        #                 nn.GELU(),
+        #                 nn.Linear(128,128),
+        #                 nn.Dropout(0.1),
+        #                 nn.GELU(),
+        #                 nn.Linear(128,1*self.V_dim),
+        #                 ).to(device)
         self.coeff = nn.Sequential(
-                        nn.Linear(1*self.V_dim,128),
-                        nn.GELU(),
-                        nn.Linear(128,128),
-                        nn.Dropout(0.1),
-                        nn.GELU(),
-                        nn.Linear(128,1*self.V_dim),
+                        nn.Linear(1*self.V_dim,1*self.V_dim),
                         ).to(device)
-
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
@@ -894,10 +899,16 @@ class CostModel(Meter2Risk):
 class Coefficient(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
         super().__init__(device)
-        self.th = 50
         self.coeff = nn.Parameter(torch.randn(self.V_dim,device=self.device))
     def forward(self):
         return self.coeff
+    
+class EqualCost(Meter2Risk):
+    def __init__(self, device: str = 'cpu') -> None:
+        super().__init__(device)
+        self.coeff = torch.ones(self.V_dim,device=self.device)
+    def forward(self, raw_meters):
+        return self.coeff * raw_meters
 
 CostModules = {
     'deep_cost':DeepCost,
@@ -908,4 +919,5 @@ CostModules = {
     'CostModel':CostModel,
     'CostModelTV':CostModelTV,
     'Coefficient':Coefficient,
+    'EqualCost':EqualCost,
 }
