@@ -20,8 +20,8 @@ W = 2.0  # width of car
 R = W/2.0
 LF = 3.3  # distance from rear to vehicle front end
 LB = 1.0  # distance from rear to vehicle back end
-MAX_STEER = 1.0  # [rad] maximum steering angle
-
+MAX_STEER = 0.6  # [rad] maximum steering angle
+MAX_ACC = 5
 BUBBLE_DIST = (LF - LB) / 2.0  # distance from rear to center of vehicle.
 BUBBLE_R = np.hypot((LF + LB) / 2.0, W / 2.0)  # bubble radius
 

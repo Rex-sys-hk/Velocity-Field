@@ -3,6 +3,7 @@ import torch
 from torch import int64, long, nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from utils.riskmap.car import MAX_ACC, MAX_STEER
 from utils.riskmap.rm_utils import load_cfg_here
 from .meter2risk import CostModules, Meter2Risk 
 
@@ -139,15 +140,20 @@ class AgentDecoder(nn.Module):
         self.decode = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU(), nn.Linear(256, future_steps*3))
 
     def transform(self, prediction, current_state):
-        x = current_state[:, 0] 
-        y = current_state[:, 1]
-        theta = current_state[:, 2]
-        delta_x = prediction[:, :, 0]
-        delta_y = prediction[:, :, 1]
-        delta_theta = prediction[:, :, 2]
-        new_x = x.unsqueeze(1) + delta_x 
-        new_y = y.unsqueeze(1) + delta_y 
-        new_theta = theta.unsqueeze(1) + delta_theta
+        x = current_state[:,None,:, 0] 
+        y = current_state[:,None,:, 1]
+        theta = current_state[:,None,:, 2]
+        
+        delta_x = prediction[..., 0]
+        delta_y = prediction[..., 1]
+        delta_theta = prediction[..., 2]
+        # _sin = torch.sin(theta)
+        # _cos = torch.cos(theta)
+        # new_x = x.unsqueeze(-2) + delta_x*_cos-delta_y*_sin
+        # new_y = y.unsqueeze(-2) + delta_x*_sin+delta_y*_cos
+        new_x = x.unsqueeze(-1) + delta_x
+        new_y = y.unsqueeze(-1) + delta_y
+        new_theta = theta.unsqueeze(-1) + delta_theta
         traj = torch.stack([new_x, new_y, new_theta], dim=-1)
 
         return traj
@@ -155,7 +161,8 @@ class AgentDecoder(nn.Module):
     def forward(self, agent_map, agent_agent, current_state):
         feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1, 1)], dim=-1)
         decoded = self.decode(feature).view(-1, self.mode_num, 10, self._future_steps, 3)
-        trajs = torch.stack([self.transform(decoded[:, i, j], current_state[:, j]) for i in range(self.mode_num) for j in range(10)], dim=1)
+        # trajs = torch.stack([self.transform(decoded[:, i, j], current_state[:, j]) for i in range(self.mode_num) for j in range(10)], dim=1)
+        trajs = self.transform(decoded, current_state)
         trajs = torch.reshape(trajs, (-1, self.mode_num, 10, self._future_steps, 3))
 
         return trajs
@@ -186,11 +193,15 @@ class AVDecoderNc(nn.Module):
         cfg = load_cfg_here()
         self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         self.control = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU(), nn.Linear(256, future_steps*2))
+        a_max = MAX_ACC
+        s_max = MAX_STEER
+        self.mean_control = torch.tensor([a_max,s_max])
 
     def forward(self, agent_map, agent_agent):
         feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1)], dim=-1)
         actions = self.control(feature).view(-1, self.mode_num , self._future_steps, 2)
-
+        self.mean_control = self.mean_control.to(actions.device)
+        actions = torch.sigmoid(actions)*2*self.mean_control - self.mean_control
         return actions, 0
 
 class Score(nn.Module):
