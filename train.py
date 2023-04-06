@@ -61,6 +61,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## DEPRECATED
         elif planner.name=='dipp':
             planner: MotionPlanner = planner
+            # init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
             u, prediction = select_future(plans, predictions, best_mode)
 
             planner_inputs = {
@@ -84,12 +85,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
+            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
             u, prediction = select_future(plans, predictions, best_mode)
-            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
-            # loss += 0.001*torch.norm(u,dim=-1).mean()
-            init_guess = bicycle_model(u, ego[:, -1])
             loss += F.smooth_l1_loss(init_guess[..., :2], ground_truth[:, 0, :, :2]) 
             loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :2], ground_truth[:, 0, -1, :2])
+            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
+            # loss += 0.001*torch.norm(u,dim=-1).mean()
+            # init_guess = bicycle_model(u, ego[:, -1])
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -104,13 +106,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
+            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
             u, prediction = select_future(plans, predictions, best_mode)
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             # guess loss
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -129,13 +132,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
             cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
+            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
             u, prediction = select_future(plans, predictions, best_mode)
+            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
+            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             # guess loss
             # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
             # loss += 0.001*torch.norm(u,dim=-1).mean()
             init_guess = bicycle_model(u,ego[:, -1])
-            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -155,10 +159,6 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) # ADE
             plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2]) # FDE
             # plan_loss += 2*F.smooth_l1_loss(plan[:, 0], ground_truth[:, 0, 0, :3]) # SDE
-            # print(ego[0,-2:])
-            # print(ground_truth[0, 0, 0, :3])
-            # print(plans[0,torch.argmax(best_mode[0]),0])
-            # print(plan[0,0])
             loss += plan_loss
         # loss backward
         loss.backward()
