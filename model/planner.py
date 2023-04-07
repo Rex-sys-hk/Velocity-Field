@@ -3,6 +3,7 @@ import sys
 import os
 from turtle import TurtleScreenBase
 from matplotlib.pyplot import flag
+from numpy import cross
 import torch
 from utils.riskmap.car import bicycle_model, pi_2_pi
 from utils.test_utils import batch_check_collision, batch_check_traffic, batch_sample_check_collision, batch_sample_check_traffic
@@ -28,6 +29,32 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
     u = torch.cat([init_guess_u,u],dim=1)
     X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
     return {'X':X,'u':u}
+
+def sample_loss(CE, sample, gt, costs, cfg, tk=10):
+    loss = 0
+    loss += 1e-3*torch.norm(costs,dim=-1).mean()
+    if not(cfg['loss']['dis_prob'] or cfg['loss']['gt_label']):
+        return loss
+    diffXd = torch.norm(
+        sample['X'][:,1:,..., :2] - gt[..., :2], dim=-1)
+    diffXd = torch.nn.functional.normalize(diffXd,dim=1)
+    diffXd = torch.topk(diffXd.mean(dim=-1), tk, dim=1)
+    
+    traj_risk = torch.mean(costs[:, 1:],dim=-1)
+    # traj_risk = torch.topk(traj_risk, 10, dim=1)
+    traj_risk = torch.stack([traj_risk[i,diffXd.indices[i]]for i in range(traj_risk.shape[0])],dim=0)
+    traj_risk = torch.cat([costs[:,0:1].mean(dim=-1),traj_risk],dim=1)
+    prob = torch.softmax(-traj_risk, dim=1)
+    if cfg['loss']['dis_prob']:
+        # smoothed distance loss
+        diffXd = torch.cat([torch.zeros_like(diffXd.values[:,0:1]),diffXd.values],dim=1)
+        dis_prob = torch.softmax(-diffXd, dim=1)
+        loss += CE(prob, dis_prob)
+    if cfg['loss']['gt_label']:
+        # label loss
+        label = torch.zeros_like(prob[:,0]).long()
+        loss += CE(prob, label)
+    return loss
 
 class Planner:
     def __init__(self, device='cuda:0', test=False) -> None:
@@ -148,21 +175,8 @@ class EularSamplingPlanner(Planner):
                                     self.context['ref_line_info'], 
                                     )
         cost = self.cost_function_weights(cost)
+        
         loss = 0
-        # regularization
-        loss += 1e-3*torch.norm(cost,dim=-1).mean()
-        prob = torch.softmax(torch.mean(-cost[...],dim=-1), dim=1)
-        if self.cfg['loss']['dis_prob']:
-            # smoothed distance loss
-            diffXd = torch.norm(
-                self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-            diffXd = torch.nn.functional.normalize(diffXd,dim=1)
-            dis_prob = torch.softmax(torch.mean(-diffXd[...],dim=-1), dim=1)
-            loss += self.crossE(prob, dis_prob)
-        if self.cfg['loss']['gt_label']:
-            # label loss
-            label = torch.zeros_like(prob[:,0]).long()
-            loss += self.crossE(prob, label)
         if self.cfg['loss']['nmp_loss']:
             # dxdy = self.context['vf_map'].vector_field_diff(self.gt_sample['X'])
             gt_x = self.gt_sample['X'][:,0:1]
@@ -171,12 +185,16 @@ class EularSamplingPlanner(Planner):
             sample_cost = cost[:,1:]
             collide = batch_sample_check_collision(sample_x,self.context['predictions'], self.context['current_state'][:, :, 5:])
             tl, offroad = batch_sample_check_traffic(sample_x, self.context['ref_line_info'])
-            L = gt_cost-sample_cost+torch.norm(gt_x[...,:2]-sample_x[...,:2],dim=-1, keepdim=True)+torch.logical_or(collide, torch.logical_or(tl, offroad)).unsqueeze(-1).unsqueeze(-1)*1000
+            L = gt_cost \
+                -sample_cost+torch.norm(gt_x[...,:2]-sample_x[...,:2],dim=-1, keepdim=True) \
+                +torch.logical_or(collide, torch.logical_or(tl, offroad)).unsqueeze(-1).unsqueeze(-1)*1000
             L = L.clamp(min=0, max=1000)
             L = L.sum(dim=-1)
             L = torch.amax(L,dim=-1)
             loss += L.mean()
-        if tb_writer:
+        else:
+            loss += sample_loss(self.crossE, self.gt_sample, gt, gt_risk, self.cfg)
+        if tb_writer and loss.device==torch.device('cuda:0'):
             tb_writer.add_scalar('train/'+'plan_loss', loss.mean(), tb_iter)
 
         return loss
@@ -255,25 +273,9 @@ class RiskMapPlanner(Planner):
                                             self.context['vf_map']
                                             )
         gt_risk = self.meter2risk(raw_meter)
-
-
         gt_risk = gt_risk.mean(dim=-1)
 
         loss = 0
-        # regularization
-        loss += 1e-3*torch.norm(gt_risk,dim=-1).mean()
-        prob = torch.softmax(torch.mean(-gt_risk[...],dim=-1), dim=1)
-        if self.cfg['loss']['dis_prob']:
-            # smoothed distance loss
-            diffXd = torch.norm(
-                self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-            diffXd = torch.nn.functional.normalize(diffXd,dim=1)
-            dis_prob = torch.softmax(torch.mean(-diffXd[...],dim=-1), dim=1)
-            loss += self.crossE(prob, dis_prob)
-        if self.cfg['loss']['gt_label']:
-            # label loss
-            label = torch.zeros_like(prob[:,0]).long()
-            loss += self.crossE(prob, label)
         if self.cfg['loss']['nmp_loss']:
             dxdy = self.context['vf_map'].vector_field_diff(self.gt_sample['X'])
             gt_x = self.gt_sample['X'][:,0:1]
@@ -289,7 +291,9 @@ class RiskMapPlanner(Planner):
             L = L.sum(dim=-1)
             L = torch.amax(L,dim=-1)
             loss += L.mean()
-        if tb_writer and prob.device==torch.device('cuda:0'):
+        else:
+            loss += sample_loss(self.crossE, self.gt_sample, gt, gt_risk, self.cfg)
+        if tb_writer and loss.device==torch.device('cuda:0'):
             tb_writer.add_scalar('train/'+'plan_loss', loss.mean(), tb_iter)
 
         return loss
@@ -354,18 +358,6 @@ class CostMapPlanner(Planner):
                                          sample_num=self.gt_sample_num,
                                          turb_num=self.turb_num)
         sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
-        prob = torch.softmax(torch.mean(-sample_costs[...],dim=-1), dim=1)
-        if self.cfg['loss']['dis_prob']:
-            # smoothed distance loss
-            diffXd = torch.norm(
-                self.gt_sample['X'][..., :2] - gt[..., :2], dim=-1)
-            diffXd = torch.nn.functional.normalize(diffXd,dim=1)
-            dis_prob = torch.softmax(torch.mean(-diffXd[...],dim=-1), dim=1)
-            loss += self.crossE(prob, dis_prob)
-        if self.cfg['loss']['gt_label']:
-            # label loss
-            label = torch.zeros_like(prob[:,0]).long()
-            loss += self.crossE(prob, label)
         if self.cfg['loss']['nmp_loss']:
             cost = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
             gt_x = self.gt_sample['X'][:,0:1]
@@ -379,7 +371,9 @@ class CostMapPlanner(Planner):
             L = L.sum(dim=-1)
             L = torch.amax(L,dim=-1)
             loss += L.mean()
-        if tb_writer and prob.device==torch.device('cuda:0'):
+        else:
+            loss += sample_loss(self.crossE, self.gt_sample, gt, sample_costs, self.cfg)
+        if tb_writer and loss.device==torch.device('cuda:0'):
             tb_writer.add_scalar('train/'+'plan_loss', loss.mean(), tb_iter)
         return loss
 

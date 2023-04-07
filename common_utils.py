@@ -9,7 +9,8 @@ Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查�
 import torch
 import numpy as np
 import multiprocessing
-from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre, STCostMap
+from model.predictor import BasePre, CostVolume, EularPre, Predictor, RiskMapPre
+from model.predictor_base import STCostMap
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, RiskMapPlanner
 from utils.riskmap.car import bicycle_model, pi_2_pi, traj_smooth, TrajSmooth, traj_smooth_mp
 from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
@@ -91,18 +92,17 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
     ref_line_info = batch[4].to(args.device)
     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
     with torch.no_grad():
-        plans, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        plan_trajs = torch.stack([bicycle_model(plans[:, i], ego[:, -1])[:, :, :3] for i in range(scores.shape[1])], dim=1)
-        # plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
-        # plans = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1)
-
+        us, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        plan_trajs = torch.stack([bicycle_model(us[:, i], ego[:, -1])[:, :, :3] for i in range(scores.shape[1])], dim=1)
+        u, prediction = select_future(us, predictions, scores)
+        init_guess, prediction = select_future(plan_trajs, predictions, scores)
     if not use_planning:
         plan, prediction = select_future(plan_trajs, predictions, scores)
     elif planner.name=='dipp':
-        plan, prediction = select_future(plans, predictions, scores)
+        u, prediction = select_future(us, predictions, scores)
 
         planner_inputs = {
-            "control_variables": plan.view(-1, 100), # generate initial control sequence
+            "control_variables": u.view(-1, 100), # generate initial control sequence
             "predictions": prediction, # generate predictions for surrounding vehicles 
             "ref_line_info": ref_line_info,
             "current_state": current_state
@@ -119,7 +119,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
 
     elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            u, prediction = select_future(plans, predictions, scores)
+            # u, prediction = select_future(us, predictions, scores)
 
             planner_inputs = {
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -131,12 +131,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             plan,u = planner.plan(planner_inputs)
     
     elif planner.name=='risk':
-        u, prediction = select_future(plans, predictions, scores)
-        u = torch.cat([
-                u[...,0:1].clamp(-5,5),
-                pi_2_pi(u[...,1:2])
-                ],dim=-1)
-        plan = bicycle_model(u, ego[:, -1])
+        # u, prediction = select_future(us, predictions, scores)
         vf_map = predictor.module.vf_map if distributed else predictor.vf_map
         planner_inputs = {
             "predictions": prediction, # prediction for surrounding vehicles 
@@ -148,12 +143,13 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         with torch.no_grad():
             plan, u = planner.plan(planner_inputs) # control
     elif planner.name=='base':
-        plan, prediction = select_future(plans, predictions, scores)
-        plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
+        u, prediction = select_future(us, predictions, scores)
+        plan = init_guess
+        # plan = bicycle_model(u, ego[:, -1])[:, :, :3]
     elif planner.name=='nmp':
         planner:CostMapPlanner = planner
         cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
-        u, prediction = select_future(plans, predictions, scores)
+        u, prediction = select_future(us, predictions, scores)
         # guess loss
         planner_inputs = {
             "predictions": prediction, # prediction for surrounding vehicles 
@@ -165,6 +161,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         # plan loss
         with torch.no_grad():
             plan, _ = planner.plan(planner_inputs) # control
+    ## smoothing
     if parallel=='none':
         return plan, prediction
     plan = plan.cpu().numpy()

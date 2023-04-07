@@ -18,7 +18,8 @@ from utils.riskmap.car import bicycle_model, traj_smooth_mp
 from utils.train_utils import *
 from utils.riskmap.rm_utils import get_u_from_X, get_yawv_from_pos, has_nan, load_cfg_here
 from model.planner import BasePlanner, CostMapPlanner, EularSamplingPlanner, MotionPlanner, Planner, RiskMapPlanner
-from model.predictor import CostVolume, Predictor, STCostMap, VectorField
+from model.predictor import CostVolume, Predictor
+from model.predictor_base import STCostMap, VectorField
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -56,15 +57,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
         # us = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1).clone().detach()
         loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
+        u, prediction = select_future(us, predictions, best_mode)
+        init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
         # plan
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
         ## DEPRECATED
         elif planner.name=='dipp':
             planner: MotionPlanner = planner
-            # init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
-            u, prediction = select_future(us, predictions, best_mode)
-
             planner_inputs = {
                 "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -80,19 +80,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             plan = bicycle_model(u, ego[:, -1])[:, :, :3]
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-            plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) 
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2])
+            plan_loss += imitation_loss(plan, ground_truth)
             loss += plan_loss + 1e-3 * plan_cost # planning loss
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
-            u, prediction = select_future(us, predictions, best_mode)
-            loss += F.smooth_l1_loss(init_guess[..., :2], ground_truth[:, 0, :, :2]) 
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1, :2], ground_truth[:, 0, -1, :2])
-            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
-            # loss += 0.001*torch.norm(u,dim=-1).mean()
-            # init_guess = bicycle_model(u, ego[:, -1])
+            loss+=imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -100,21 +93,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "current_state": current_state, # including neighbor cars
                 'init_guess_u': u.detach().clone(),
             }
-
             plan,u = planner.plan(planner_inputs)
             loss += planner.get_loss(ground_truth[...,0:1,:,:], tb_iter=tb_iters, tb_writer=tbwriter)
         ## RISK
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
-            u, prediction = select_future(us, predictions, best_mode)
-            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
-            # guess loss
-            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
-            # loss += 0.001*torch.norm(u,dim=-1).mean()
-            init_guess = bicycle_model(u,ego[:, -1])
+            loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -133,14 +118,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
             cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
-            init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
-            u, prediction = select_future(us, predictions, best_mode)
-            loss += F.smooth_l1_loss(init_guess[...,:2], ground_truth[:, 0, :, :2]) # ADE
-            loss += 0.2*F.smooth_l1_loss(init_guess[:, -1,:2], ground_truth[:, 0, -1, :2]) # FDE
-            # guess loss
-            # loss += F.smooth_l1_loss(u.unsqueeze(1), get_u_from_X(ground_truth[...,0:1,:,:], current_state[:,0:1]))
-            # loss += 0.001*torch.norm(u,dim=-1).mean()
-            init_guess = bicycle_model(u,ego[:, -1])
+            loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -155,11 +133,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
         ## BASELINE
         elif planner.name=='base':
-            # not choosing the nearest, but highest score one
-            plan, prediction = select_future(plan_trajs, predictions, best_mode)
-            plan_loss = F.smooth_l1_loss(plan[...,:2], ground_truth[:, 0, :, :2]) # ADE
-            plan_loss += 0.2*F.smooth_l1_loss(plan[:, -1,...,:2], ground_truth[:, 0, -1, :2]) # FDE
-            # plan_loss += 2*F.smooth_l1_loss(plan[:, 0], ground_truth[:, 0, 0, :3]) # SDE
+            plan_loss = imitation_loss(init_guess, ground_truth)
+            plan = init_guess
             loss += plan_loss
         # loss backward
         loss.backward()
@@ -175,9 +150,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             if use_planning:
                 if planner.name in ['risk','esp','nmp']:
                     for traj in planner.gt_sample['X'][0].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'g--',lw=0.2, zorder=2)
+                        plt.plot(traj[...,0],traj[...,1],'g--', lw=0.2, zorder=2, alpha = 0.2)
                     for traj in planner.sample_plan['X'][0].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'r--',lw=0.2, zorder=2)
+                        plt.plot(traj[...,0],traj[...,1],'r--', lw=0.2, zorder=2, alpha = 0.2)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():
@@ -193,15 +168,15 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 
             ## general output
             # reference lane
-            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=4, zorder=0, label='reflane')
+            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=4, zorder=0, alpha=0.2, label='reflane')
             # ego history
-            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), color = 'g--', marker = '.',  markersize=1, lw=0.5, zorder=1, label='history')
+            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), 'g--', marker = '.',  markersize=1, lw=0.5, zorder=1, alpha=0.2, label='history')
             # ground truth
-            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', markersize=1, lw=0.5, zorder=1, label='GT')
+            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', zorder=1, lw=3, alpha=0.2, label='GT')
             # result
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.',  markersize=0.8, lw=0.4, zorder=4,label='plan result')
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.',  markersize=0.8, lw=0.4, zorder=4, alpha=0.2, label='plan result')
             for mod in plan_trajs[0].cpu().detach():
-                plt.plot(mod[...,0], mod[...,1],'cyan', lw=0.5, zorder=2)
+                plt.plot(mod[...,0], mod[...,1],'cyan', lw=0.5, zorder=2, alpha = 0.2)
             # prediction_t = prediction*masks
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')

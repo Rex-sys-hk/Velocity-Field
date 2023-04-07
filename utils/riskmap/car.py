@@ -269,6 +269,9 @@ def traj_smooth(fut_traj:np.ndarray, init_state:np.ndarray):
     Returns:
         _type_: _description_
     """
+    ss = np.linalg.norm(np.diff(fut_traj,axis = -2),axis=-1)
+    if np.sum(ss)<=3:
+        return fut_traj
     ego_trajectory = np.concatenate([init_state[...,:3], fut_traj[...,:3]], axis=-2)
     ego_x, ego_y, ego_yaw = ego_trajectory.T
     ego_velocity = np.linalg.norm(np.diff(ego_trajectory[:, :2], axis=0), axis=1)/0.1 # didn't divided by dt before

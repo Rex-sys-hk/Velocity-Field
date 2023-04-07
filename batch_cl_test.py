@@ -72,7 +72,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                 for i in range(len(obs)):
                     batch.append(torch.from_numpy(obs[i]))
                 if not args.gt_replay:
-                    plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning, parallel='single')
+                    plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning, parallel=args.smoothing)
                     plan_traj = plan_traj.cpu().numpy()[0]
                     prediction = prediction.cpu().numpy()[0]
                 else:
@@ -153,6 +153,7 @@ if __name__ == "__main__":
     parser.add_argument('--render', action="store_true", help='if render the scene (default: False)', default=False)
     parser.add_argument('--save', action="store_true", help='if save animation (default: False)', default=False)
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
+    parser.add_argument('--smoothing', type=str, help='enable after smoothingm include(default: none), single, mt, mp', default='none')
     parser.add_argument('--gt_replay', action="store_true", help='if replay ground truth (default: False)', default=False)
     args = parser.parse_args()
     cfg_file = args.config if args.config else 'config.yaml'

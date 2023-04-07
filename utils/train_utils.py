@@ -53,6 +53,12 @@ def select_future(plans, predictions, scores):
 
     return plan, prediction
 
+def imitation_loss(plans, ground_truth, FDE = 0.2, SDE = 0):
+    loss = F.smooth_l1_loss(plans[...,:2], ground_truth[:, 0, :, :2])
+    loss += FDE * F.smooth_l1_loss(plans[..., -1,:2], ground_truth[:, 0, -1, :2])
+    loss += SDE * F.smooth_l1_loss(plans[..., 0,:2], ground_truth[:, 0, 0, :2]) if SDE > 0 else 0
+    return loss
+
 def motion_metrics(plan_trajectory, prediction_trajectories, ground_truth_trajectories, weights):
     prediction_trajectories = prediction_trajectories * weights
     plan_distance = torch.norm(plan_trajectory[..., :2] - ground_truth_trajectories[..., 0, :, :2], dim=-1)
