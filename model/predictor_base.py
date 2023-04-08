@@ -3,7 +3,7 @@ from torch import int64, long, nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from utils.riskmap.car import MAX_ACC, MAX_STEER
-from utils.riskmap.rm_utils import load_cfg_here
+from utils.riskmap.rm_utils import load_cfg_here, standardize_vf
 # Agent history encoder
 class AgentEncoder(nn.Module):
     def __init__(self):
@@ -331,27 +331,34 @@ class VectorField(nn.Module):
     
     def plot(self, samples):
         b,s,t,d = samples.shape
-        sample_dx_dy = self.vf_inquery(samples.view(b,-1,d)[...,:2])#.reshape(b,s,t,2)
-        plt.quiver(samples.reshape(b,-1,d)[0,...,0].cpu().detach(), 
-            samples.reshape(b,-1,d)[0,...,1].cpu().detach(),
-            sample_dx_dy[0,...,0].cpu().detach(),
-            sample_dx_dy[0,...,1].cpu().detach(),
-            label='Plan Sampled Vector',
+        sample_dx_dy = self.vf_inquery(samples.reshape(b,-1,d)[...,:2])#.reshape(b,s,t,2)
+        sample_dx_dy, m = standardize_vf(sample_dx_dy)
+        plt.quiver(samples.reshape(b,-1,d)[0,::7,0].cpu().detach(), 
+            samples.reshape(b,-1,d)[0,::7,1].cpu().detach(),
+            sample_dx_dy[0,::7,0].cpu().detach(),
+            sample_dx_dy[0,::7,1].cpu().detach(),
+            label=f'Plan Sampled Vector, max={m}',
             width=0.001,
+            scale = 5,
             color='red',
             zorder=1,
-            alpha=0.2)
+            alpha=0.2,
+            scale_units='inches',
+            )
         
         dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
+        dx_dy, m = standardize_vf(dx_dy)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
                    dx_dy[...,0].cpu().detach(),
                    dx_dy[...,1].cpu().detach(),
-                   label='Vis Vector Field',
+                   label=f'Vis Vector Field, max={m}',
                    width=0.001,
+                   scale = 5,
                    color='k',
                    zorder= 1,
                    alpha= 0.2,
+                   scale_units='inches',
                    )
         
     def plot_gt(self, gt, samples):
@@ -365,6 +372,7 @@ class VectorField(nn.Module):
                                   torch.sin(samples[...,2])*samples[...,3]],
                                   dim=-1)
         diff_sample_gt += gt[...,3:5] - sample_dxy
+        diff_sample_gt, m = standardize_vf(diff_sample_gt)
         # plt.scatter(samples[0,...,0].cpu().detach(),
         #     samples[0,...,1].cpu().detach())
         plt.quiver(samples[0,...,0].cpu().detach(),
@@ -373,9 +381,12 @@ class VectorField(nn.Module):
             diff_sample_gt[0,...,1].cpu().detach(), 
             color = 'green',
             width=0.001,
-            label='GT Vector',
+            scale = 5,
+            label=f'GT Vector, max={m}',
             zorder= 1,
-            alpha = 0.2)
+            alpha = 0.2,
+            scale_units='inches',
+            )
         
     def get_loss(self, gt, sample):
         # convert to vx,vy
@@ -384,15 +395,15 @@ class VectorField(nn.Module):
         query = torch.cat([gt[...,:2],sample[...,:2]],dim=1)
         b,s,t,d = query.shape
         dx_dy = self.vf_inquery(query.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
-        dx_dy_gt = dx_dy[:,0:1]
+        dx_dy_gt = dx_dy[:,0:1]#.clamp(max = 30, min = 0)
         dx_dy_samp = dx_dy[:,1:]
         dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
         
         # imitation loss
-        loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5])
+        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5]) # TODO gt smoothing is not solved
         # regularization 
-        # loss += 1e-3*torch.norm(dx_dy_grid,dim=-1).mean()
-        loss += torch.nn.functional.smooth_l1_loss(dx_dy_grid, torch.zeros_like(dx_dy_grid))
+        loss += 1e-2*torch.norm(dx_dy_grid,dim=-1).mean()
+        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_grid, torch.zeros_like(dx_dy_grid))
         # construct field direction
         # diff_sample_gt = 0
         # dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 

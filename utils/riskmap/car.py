@@ -21,7 +21,7 @@ R = W/2.0
 LF = 3.3  # distance from rear to vehicle front end
 LB = 1.0  # distance from rear to vehicle back end
 MAX_STEER = 0.6  # [rad] maximum steering angle
-MAX_ACC = 5
+MAX_ACC = 8
 BUBBLE_DIST = (LF - LB) / 2.0  # distance from rear to center of vehicle.
 BUBBLE_R = np.hypot((LF + LB) / 2.0, W / 2.0)  # bubble radius
 
@@ -197,8 +197,8 @@ def bicycle_model(control, current_state):
         logging.error('[ERROR]tensor dim inconsist')
         raise ValueError('control and state dim inconsistent')
     dt = 0.1 # discrete time period [s]
-    max_delta = 0.6 # vehicle's steering limits [rad]
-    max_a = 5 # vehicle's accleration limits [m/s^2]
+    max_delta = MAX_STEER # vehicle's steering limits [rad]
+    max_a = MAX_ACC # vehicle's accleration limits [m/s^2]
     L = WB # vehicle's wheelbase [m]
     x_0 = current_state[..., 0] # vehicle's x-coordinate [m]
     y_0 = current_state[..., 1] # vehicle's y-coordinate [m]

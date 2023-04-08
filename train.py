@@ -59,6 +59,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
         u, prediction = select_future(us, predictions, best_mode)
         init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
+        # TODO GT smoother
         # plan
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
@@ -85,7 +86,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            loss+=imitation_loss(init_guess, ground_truth)
+            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            loss += F.smooth_l1_loss(u, gt_u)
+            # loss+=imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -99,7 +102,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-            loss += imitation_loss(init_guess, ground_truth)
+            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            loss += F.smooth_l1_loss(u, gt_u)
+            # loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -118,7 +123,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
             cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
-            loss += imitation_loss(init_guess, ground_truth)
+            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            loss += F.smooth_l1_loss(u, gt_u)
+            # loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -133,9 +140,10 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
         ## BASELINE
         elif planner.name=='base':
-            plan_loss = imitation_loss(init_guess, ground_truth)
+            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            loss += F.smooth_l1_loss(u, gt_u)
+            # loss += imitation_loss(init_guess, ground_truth)
             plan = init_guess
-            loss += plan_loss
         # loss backward
         loss.backward()
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)
@@ -151,13 +159,13 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 if planner.name in ['risk','esp','nmp']:
                     for traj in planner.gt_sample['X'][0].cpu().detach():
                         plt.plot(traj[...,0],traj[...,1],'g--', lw=0.2, zorder=2, alpha = 0.2)
-                    for traj in planner.sample_plan['X'][0].cpu().detach():
+                    for traj in planner.sample_plan['X'][0,::10].cpu().detach():
                         plt.plot(traj[...,0],traj[...,1],'r--', lw=0.2, zorder=2, alpha = 0.2)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():
-                        vf_map.plot(planner.sample_plan['X'])
-                        vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
+                        vf_map.plot(planner.sample_plan['X'][:,::10])
+                        # vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
                 if planner.name in ['nmp']:
                     cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
                     cost_map.plot(planner.sample_plan['X'])
@@ -168,15 +176,15 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 
             ## general output
             # reference lane
-            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow',lw=4, zorder=0, alpha=0.2, label='reflane')
+            plt.plot(ref_line_info[0,...,0].cpu().detach(),ref_line_info[0,...,1].cpu().detach(), color = 'yellow', lw=4, zorder=0, alpha=0.5, label='reflane')
             # ego history
-            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), 'g--', marker = '.',  markersize=1, lw=0.5, zorder=1, alpha=0.2, label='history')
+            plt.plot(ego[0,...,0].cpu().detach(), ego[0,...,1].cpu().detach(), 'g--', marker = '.',  markersize=1, lw=0.5, zorder=1, alpha=0.5, label='history')
             # ground truth
-            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', zorder=1, lw=3, alpha=0.2, label='GT')
+            plt.plot(ground_truth[0,0,...,0].cpu().detach(),ground_truth[0,0,...,1].cpu().detach(), 'g--', zorder=1, lw=3, alpha=0.5, label='GT')
             # result
-            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'orange', marker = '.',  markersize=0.8, lw=0.4, zorder=4, alpha=0.2, label='plan result')
+            plt.plot(plan[0,...,0].cpu().detach(),plan[0,...,1].cpu().detach(), color = 'cyan', marker = '.',  markersize=1.5, lw=0.6, zorder=4, alpha=0.5, label='plan result')
             for mod in plan_trajs[0].cpu().detach():
-                plt.plot(mod[...,0], mod[...,1],'cyan', lw=0.5, zorder=2, alpha = 0.2)
+                plt.plot(mod[...,0], mod[...,1], 'grey', lw=0.5, zorder=2, alpha = 0.5)
             # prediction_t = prediction*masks
             # for nei in range(10):
             #     plt.plot(prediction_t[0,nei,...,0].cpu().detach(),prediction_t[0,nei,...,1].cpu().detach(),'y--')

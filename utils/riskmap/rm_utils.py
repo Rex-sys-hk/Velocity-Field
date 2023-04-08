@@ -699,6 +699,14 @@ def yawv2yawdxdy(X):
     dy = v*torch.sin(yaw)
     return torch.cat([x,y,yaw,dx,dy],dim=-1)
 
+def standardize_vf(dx_dy):
+    # dx_dy: [x,y,dx,dy]
+    # return: [x,y,dx,dy]
+    # dx_dy[...,2:4] = dx_dy[...,2:4]/torch.max(torch.abs(dx_dy[...,2:4]))
+    max_num = torch.max(torch.norm(dx_dy[...,:2],dim=-1,keepdim=True))
+    dx_dy[...,:2] = dx_dy[...,:2]/max_num
+    return dx_dy, max_num
+
 # %% cost functions
 
 

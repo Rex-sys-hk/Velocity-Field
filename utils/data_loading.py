@@ -10,7 +10,7 @@ from utils.riskmap.torch_lattice import LatticeSampler
 from utils.data_augmentation.kinematic_agent_augmentation import KinematicAgentAugmentor
 from utils.data_augmentation.nuplan_utils.trajectory import Trajectory
 from utils.data_augmentation.nuplan_utils.agents import Agents
-from utils.riskmap.car import bicycle_model, pi_2_pi_pos
+from utils.riskmap.car import bicycle_model, pi_2_pi_pos, traj_smooth
 from utils.test_utils import batch_check_collision, check_collision
 
 class DrivingData(Dataset):
@@ -76,8 +76,8 @@ class DrivingData(Dataset):
                                                             )
             # center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True
             # ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
-        # normalize base on the new GT
-        # print(ego.shape, gt_future_states.shape)
+        if self.data_aug:
+            gt_future_states[0] = traj_smooth(gt_future_states[0], ego[-1:])
         return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
     
     def data_augment(self, ego, gt, neighbors):
