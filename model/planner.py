@@ -193,7 +193,7 @@ class EularSamplingPlanner(Planner):
             L = torch.amax(L,dim=-1)
             loss += L.mean()
         else:
-            loss += sample_loss(self.crossE, self.gt_sample, gt, gt_risk, self.cfg)
+            loss += sample_loss(self.crossE, self.gt_sample, gt, cost, self.cfg)
         if tb_writer and loss.device==torch.device('cuda:0'):
             tb_writer.add_scalar('train/'+'plan_loss', loss.mean(), tb_iter)
 
