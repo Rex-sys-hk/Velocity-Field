@@ -26,8 +26,8 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
     u = (torch.randn([btsz,sample_num,turb_num,2],device = init_guess_u.device)*cov)+init_guess_u
     cur_state = context['current_state'][:,0:1]
     X = bicycle_model(u,cur_state)
-    u = torch.cat([init_guess_u,u],dim=1)
-    X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=1)
+    u = torch.cat([init_guess_u,u],dim=-3)
+    X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=-3)
     return {'X':X,'u':u}
 
 def sample_loss(CE, sample, gt, costs, cfg, tk=10):

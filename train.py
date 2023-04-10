@@ -158,9 +158,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             if use_planning:
                 if planner.name in ['risk','esp','nmp']:
                     for traj in planner.gt_sample['X'][0].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'g--', lw=0.2, zorder=2, alpha = 0.2)
+                        plt.plot(traj[...,0],traj[...,1],'g', lw=0.3, zorder=2, alpha = 0.2)
                     for traj in planner.sample_plan['X'][0,::10].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'r--', lw=0.2, zorder=2, alpha = 0.2)
+                        plt.plot(traj[...,0],traj[...,1],'r++', lw=0.3, zorder=2, alpha = 0.2)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():

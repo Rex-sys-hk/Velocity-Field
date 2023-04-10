@@ -208,13 +208,13 @@ def bicycle_model(control, current_state):
     delta = control[..., 1].clamp(-max_delta, max_delta) # vehicle's steering [rad]
     # speed
     v = v_0.unsqueeze(-1) + torch.cumsum(a * dt, dim=-1)
-    v = torch.clamp(v, min=0)
+    # v = torch.clamp(v, min=0)
 
     # angle
     d_theta = v * torch.tan(delta) / L # use delta to approximate tan(delta)
     theta = theta_0.unsqueeze(-1) + torch.cumsum(d_theta * dt, dim=-1)
     # theta = torch.fmod(theta, 2*torch.pi)
-    theta = pi_2_pi(theta)
+    theta = pi_2_pi_pos(theta)
     
     # x and y coordniate
     x = x_0.unsqueeze(-1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
