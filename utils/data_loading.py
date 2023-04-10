@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset
 from utils.data_utils import agent_norm, map_norm, ref_line_norm
+from utils.riskmap.rm_utils import get_u_from_X
 from utils.riskmap.torch_lattice import LatticeSampler
 from utils.data_augmentation.kinematic_agent_augmentation import KinematicAgentAugmentor
 from utils.data_augmentation.nuplan_utils.trajectory import Trajectory
 from utils.data_augmentation.nuplan_utils.agents import Agents
-from utils.riskmap.car import bicycle_model, pi_2_pi_pos, traj_smooth
+from utils.riskmap.car import bicycle_model, pi_2_pi, pi_2_pi_pos, traj_smooth
 from utils.test_utils import batch_check_collision, check_collision
 
 class DrivingData(Dataset):
@@ -77,7 +78,28 @@ class DrivingData(Dataset):
             # center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True
             # ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
         if self.data_aug:
+            # pass
+            # xy = np.concatenate([ego[-1:,:2],gt_future_states[0,...,:2]],axis=0).copy()
             gt_future_states[0] = traj_smooth(gt_future_states[0], ego[-1:])
+
+            # xy = scipy.signal.savgol_filter(xy, window_length=5, polyorder=3, deriv=0, delta=0.1, axis=-2, mode='interp')
+            # u = get_u_from_X(torch.tensor(xy[1:]), torch.tensor(ego[-1,:]))
+
+            # u = get_u_from_X(torch.tensor(gt_future_states[0,:,:5]), torch.tensor(ego[-1,:]))
+            # traj = bicycle_model(u, torch.tensor(ego[-1,:]))
+            # if torch.abs(u[...,0]).max()>=5:
+            #     plt.cla()
+            #     # plt.plot(xy[:,0],xy[:,1],'r',marker='o', lw=0.2, markersize=0.5)
+            #     plt.plot(ego[:,0],ego[:,1], 'b',marker='.', lw=0.2, markersize=0.5)
+            #     plt.plot(traj[:,0],traj[:,1], 'r',marker='.', lw=0.2, markersize=0.5)
+            #     plt.plot(gt_future_states[0,:,0],gt_future_states[0,:,1], 'g',marker='.', lw=0.2, markersize=0.5)
+            #     plt.plot(gt_future_states[0,:,0],u[...,0],'k',marker='.', lw=0.2, markersize=0.5)
+            #     plt.plot(gt_future_states[0,:,0],u[...,1],'grey',marker='.', lw=0.2, markersize=0.5)
+            #     plt.axis('equal')
+            #     plt.grid(True)
+            #     plt.title(f'max u: {torch.abs(u[...,0]).max()}')
+            #     plt.savefig('./data_aug.png', dpi=400)
+
         return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
     
     def data_augment(self, ego, gt, neighbors):
@@ -108,13 +130,13 @@ class DrivingData(Dataset):
         # plt.show()
         aug_ego = aug_features['agents'].ego[0]
         v = np.diff(aug_ego[...,:2],axis=-2)/0.1
-        v = np.pad(v, (1,0), 'edge')
-        aug_ego = np.concatenate([aug_features['agents'].ego[0],v[:, 0:1], v[:, 1:2]],axis=-1)
+        v = np.pad(v, ((1,0),(0,0)), 'edge')
+        aug_ego = np.concatenate([aug_features['agents'].ego[0][...,:3],v],axis=-1)
 
         aug_gt = aug_targets['trajectory'].data
         ext_aug_gt = np.concatenate([aug_ego[-1:,:3], aug_gt],axis=-2)
         aug_v = np.diff(ext_aug_gt[...,:2],axis=-2)/0.1
-        aug_gt = np.concatenate([aug_targets['trajectory'].data,aug_v[:, 0:1], aug_v[:, 1:2]],axis=-1)
+        aug_gt = np.concatenate([aug_targets['trajectory'].data, aug_v], axis=-1)
         size = np.concatenate([ego[-1,None,5:],neighbors[-1,:,5:8]],axis=0)
         if batch_check_collision(torch.tensor(aug_gt[None,:,:]), torch.tensor(gt[None,1:,:,:3]), torch.tensor(size[None,:])):
             return ego[...,:5], gt[0,:,:5]

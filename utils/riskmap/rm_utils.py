@@ -1,6 +1,7 @@
 from re import L
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
+import scipy
 import torch.distributions as td
 from scipy.spatial.distance import cdist
 import psutil
@@ -11,7 +12,7 @@ import yaml
 import os
 import sys
 import math
-from torch import nn, true_divide
+from torch import mode, nn, true_divide
 
 from utils.train_utils import project_to_frenet_frame
 from .car import WB, bicycle_model, pi_2_pi, pi_2_pi_pos
@@ -679,7 +680,7 @@ def get_u_from_X(X, init_state, dt = 0.1, L = WB):
         X = get_yawv_from_pos(X, init_state, dt = dt)
     # extend fut_traj
     _X = torch.cat([init_state[...,:5].unsqueeze(-2),X[...,:5]],dim = -2)
-    v = torch.hypot(_X[..., 3], _X[..., 4]) # vehicle's velocity [m/s]
+    v = torch.norm(_X[..., 3:5], dim=-1) # vehicle's velocity [m/s]
     a = torch.diff(v,dim=-1)/dt
     d_theta = pi_2_pi(torch.diff(_X[...,2],dim=-1)/dt)
     steering = torch.atan2(L*d_theta,v[...,1:])

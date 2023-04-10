@@ -73,20 +73,21 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         v = torch.diff(ego_his,dim=-2)/self.dt
         v = torch.cat([v[:,0:1], v], dim=-2) # padding
         ego_his = torch.cat([ego_his, v],dim=-1)
-        context = {'init_guess_u': get_u_from_X(ego_his[:,1:], ego_his[:,0]),
+        context = {'init_guess_u': get_u_from_X(ego_his[...,1:,:2], ego_his[...,0,:]),
                    'current_state': ego_his[:,0:1]}
-        aug_his = get_sample(context, cov = torch.tensor([.4,.2]), sample_num=1, turb_num=19)
-        features['agents'].ego[:,1:] = aug_his['X'][:,0,:,:3].numpy()
-        
+        aug_his = get_sample(context, cov = torch.tensor([.2,.1]), sample_num=1, turb_num=19)
+        features['agents'].ego[:,1:] = aug_his['X'][:,1,:,:3].numpy()
 
         ego_trajectory = np.concatenate(
-            [features['agents'].ego[0][-1:, :3], targets['trajectory'].data]
+            [features['agents'].ego[0, -1:, :3], targets['trajectory'].data],
+            axis=-2
         )
         ego_x, ego_y, ego_yaw = ego_trajectory.T
-        ego_velocity = np.linalg.norm(np.diff(ego_trajectory[:, :2], axis=0), axis=1)/self.dt # didn't divided by dt brefore
+        # ego_velocity = np.linalg.norm(np.diff(ego_trajectory[..., :2], axis=-2), axis=-1)/self.dt 
+        # ego_velocity = np.linalg.norm(np.diff(features['agents'].ego[0,:,:2], axis=-2), axis=-1)/self.dt # didn't divided by dt brefore
 
         # Define the 'current state' as a boundary condition, and reference trajectory
-        x_curr = [ego_x[0], ego_y[0], ego_yaw[0], ego_velocity[0]]
+        x_curr = [ego_x[0], ego_y[0], ego_yaw[0], aug_his['X'][0,1,-1,3].numpy()]
         ref_traj = ego_trajectory
 
         # Set reference and solve
