@@ -214,7 +214,7 @@ def bicycle_model(control, current_state):
     d_theta = v * torch.tan(delta) / L # use delta to approximate tan(delta)
     theta = theta_0.unsqueeze(-1) + torch.cumsum(d_theta * dt, dim=-1)
     # theta = torch.fmod(theta, 2*torch.pi)
-    theta = pi_2_pi_pos(theta)
+    theta = pi_2_pi(theta)
     
     # x and y coordniate
     x = x_0.unsqueeze(-1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)
