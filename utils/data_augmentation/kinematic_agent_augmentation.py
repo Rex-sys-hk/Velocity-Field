@@ -58,7 +58,7 @@ class KinematicAgentAugmentor(AbstractAugmentor):
         self.dt = dt
 
     def augment(
-        self, features: FeaturesType, targets: TargetsType, scenario = None
+        self, features: FeaturesType, targets: TargetsType, scenario = None, hist_only = False
     ) -> Tuple[FeaturesType, TargetsType]:
         """Inherited, see superclass."""
         if np.random.rand() >= self._augment_prob:
@@ -77,7 +77,8 @@ class KinematicAgentAugmentor(AbstractAugmentor):
                    'current_state': ego_his[:,0:1]}
         aug_his = get_sample(context, cov = torch.tensor([.2,.1]), sample_num=1, turb_num=19)
         features['agents'].ego[:,1:] = aug_his['X'][:,1,:,:3].numpy()
-
+        if hist_only:
+            return features, targets
         ego_trajectory = np.concatenate(
             [features['agents'].ego[0, -1:, :3], targets['trajectory'].data],
             axis=-2

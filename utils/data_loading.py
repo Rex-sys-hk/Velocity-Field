@@ -77,10 +77,10 @@ class DrivingData(Dataset):
                                                             )
             # center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True
             # ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
-        if self.data_aug:
+        # if self.data_aug:
             # pass
             # xy = np.concatenate([ego[-1:,:2],gt_future_states[0,...,:2]],axis=0).copy()
-            gt_future_states[0] = traj_smooth(gt_future_states[0], ego[-1:])
+            # gt_future_states[0] = traj_smooth(gt_future_states[0], ego[-1:])
 
             # xy = scipy.signal.savgol_filter(xy, window_length=5, polyorder=3, deriv=0, delta=0.1, axis=-2, mode='interp')
             # u = get_u_from_X(torch.tensor(xy[1:]), torch.tensor(ego[-1,:]))
@@ -121,7 +121,7 @@ class DrivingData(Dataset):
         targets = {
             'trajectory': Trajectory(data=gt[0,...,:3]),
         }
-        aug_features, aug_targets = self.gaussian_augmentor.augment(features, targets)
+        aug_features, aug_targets = self.gaussian_augmentor.augment(features, targets, hist_only=True)
         # print(aug_features['agents'].ego.shape, aug_targets['trajectory'].data.shape)
         # plt.plot(ego[:,0], ego[:,1], 'g')
         # plt.plot(gt[0,:,0], gt[0,:,1], 'g')

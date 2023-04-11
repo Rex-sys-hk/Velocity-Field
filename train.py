@@ -86,9 +86,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            loss += F.smooth_l1_loss(u, gt_u)
-            # loss+=imitation_loss(init_guess, ground_truth)
+            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            # loss += F.smooth_l1_loss(u, gt_u)
+            loss+=imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -160,7 +160,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                     for traj in planner.gt_sample['X'][0].cpu().detach():
                         plt.plot(traj[...,0],traj[...,1],'g', lw=0.3, zorder=2, alpha = 0.2)
                     for traj in planner.sample_plan['X'][0,::10].cpu().detach():
-                        plt.plot(traj[...,0],traj[...,1],'r++', lw=0.3, zorder=2, alpha = 0.2)
+                        plt.plot(traj[...,0],traj[...,1],'r--', lw=0.3, zorder=2, alpha = 0.2)
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():
