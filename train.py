@@ -86,9 +86,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            # loss += F.smooth_l1_loss(u, gt_u)
-            loss+=imitation_loss(init_guess, ground_truth)
+            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            loss += F.smooth_l1_loss(u, gt_u)
+            # loss+=imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
@@ -102,9 +102,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            loss += F.smooth_l1_loss(u, gt_u)
-            # loss += imitation_loss(init_guess, ground_truth)
+            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            # loss += F.smooth_l1_loss(u, gt_u)
+            loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -140,9 +140,9 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tbwriter)
         ## BASELINE
         elif planner.name=='base':
-            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            loss += F.smooth_l1_loss(u, gt_u)
-            # loss += imitation_loss(init_guess, ground_truth)
+            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
+            # loss += F.smooth_l1_loss(u, gt_u)
+            loss += imitation_loss(init_guess, ground_truth)
             plan = init_guess
         # loss backward
         loss.backward()
