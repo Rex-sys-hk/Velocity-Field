@@ -48,11 +48,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         map_crosswalks = batch[3].to(args.local_rank)
         ref_line_info = batch[4].to(args.local_rank)
         ground_truth = batch[5].to(args.local_rank)
+        lattice_sample = batch[6].to(args.local_rank) if batch[6].sum() else None
         current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
         masks = torch.ne(ground_truth[:, 1:, :, :3], 0) # ne is not equal
         # predict
         optimizer.zero_grad()
-        us, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
+        us, predictions, scores, identical_output = predictor(ego, neighbors, map_lanes, map_crosswalks)
         plan_trajs = torch.stack([bicycle_model(us[:, i], ego[:, -1])[:, :, :3] for i in range(cfg['model_cfg']['mode_num'])], dim=1)
         # plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
         # us = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1).clone().detach()
@@ -73,8 +74,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "current_state": current_state # including neighbor cars
             }
 
-            for i in range(cost_function_weights.shape[1]):
-                planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
+            for i in range(identical_output.shape[1]):
+                planner_inputs[f'cost_function_weight_{i+1}'] = identical_output[:, i].unsqueeze(1)
 
             final_values, info = planner.layer.forward(planner_inputs)
             u = final_values["control_variables"].view(-1, 50, 2)
@@ -105,12 +106,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
             # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
             # loss += F.smooth_l1_loss(u, gt_u)
             loss += imitation_loss(init_guess, ground_truth)
+            loss += F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1]))
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state,
                 "vf_map": vf_map,
                 'init_guess_u': u.detach().clone(),
+                "lattice_sample": lattice_sample,
             }
             # plan loss
             plan, _ = planner.plan(planner_inputs) # control
@@ -118,7 +121,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                                      tb_iters,
                                      tbwriter)
             loss += vf_map.get_loss(ground_truth[...,0:1,:,:], 
-                                    planner.gt_sample['X'])
+                                    planner.gt_sample['X'],
+                                    planner_inputs)
         ## Neural Motion Planner
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
@@ -203,11 +207,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # logging and show loss
         if args.local_rank==0 or not distributed:
             current += batch[0].shape[0]
-            sys.stdout.write(f"\r>>>Train Progress: [{current:>6d}/{size:>6d}] \
-            Loss: {np.mean(epoch_loss):>.4f} \
-            {(time.time()-start_time)/current:>.4f}s/sample \
-            T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}"
-            )
+            sys.stdout.write(f"\r>>>Train Progress: [{current:>6d}/{size:>6d}] Loss: {np.mean(epoch_loss):>.4f} {(time.time()-start_time)/current:>.4f}s/sample T2A(epoch): {((time.time()-start_time)/current)*(size-current):>.4f}")
             sys.stdout.flush()
             tbwriter.add_scalar('train/'+'iter_loss', loss.mean(), tb_iters)
             tbwriter.add_scalar('train/metrics/'+'planADE', metrics[0], tb_iters)
@@ -327,7 +327,7 @@ def model_training():
     batch_size = args.batch_size
     
     # set up data loaders
-    train_set = DrivingData(args.train_set+'/*',data_aug=True)
+    train_set = DrivingData(args.train_set+'/*',data_aug=True) # TODO
     valid_set = DrivingData(args.valid_set+'/*')
     if distributed:
         predictor = DDP(

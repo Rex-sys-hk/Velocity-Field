@@ -18,3 +18,4 @@ config.yaml
 start_ol_visualize.sh
 start_cl_test_bt.sh
 start_cl_visualize.sh
+weight.png

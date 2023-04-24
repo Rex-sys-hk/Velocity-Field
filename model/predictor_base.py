@@ -3,7 +3,8 @@ from torch import int64, long, nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from utils.riskmap.car import MAX_ACC, MAX_STEER
-from utils.riskmap.rm_utils import load_cfg_here, standardize_vf
+from utils.riskmap.rm_utils import has_nan, load_cfg_here, standardize_vf, yawv2yawdxdy
+from utils.test_utils import batch_sample_check_collision
 # Agent history encoder
 class AgentEncoder(nn.Module):
     def __init__(self):
@@ -67,6 +68,40 @@ class CrosswalkEncoder(nn.Module):
         output = self.point_net(inputs)
 
         return output
+# VAE
+class VAEcore(nn.Module):
+    def __init__(self, encoding_dim, latent_dim=64) -> None:
+        super().__init__()
+                # 定义均值层和方差层
+        self.z_mean = nn.Linear(encoding_dim, latent_dim)
+        self.z_log_var = nn.Linear(encoding_dim, latent_dim)
+        self.decoder = nn.Sequential(nn.Linear(latent_dim, encoding_dim), 
+                                     nn.ReLU(), 
+                                     nn.Linear(encoding_dim, encoding_dim), 
+                                     nn.ReLU(),
+                                    nn.Linear(encoding_dim, encoding_dim),
+                                    nn.Sigmoid(),
+                                     )
+        
+    def reparameterize(self, z_mean, z_log_var):
+        epsilon = torch.randn(z_mean.size()).to(z_mean.device)
+        z = z_mean + torch.exp(0.5 * z_log_var) * epsilon
+        return z
+    
+    def loss_function(self, z_mean, z_log_var):
+        loss = -0.5 * torch.sum(1 + z_log_var - z_mean ** 2 - z_log_var.exp())
+        
+        return loss
+    
+    def forward(self, x):
+        z_mean = self.z_mean(x)
+        z_log_var = self.z_log_var(x)
+        z = self.reparameterize(z_mean, z_log_var)
+        z = self.decoder(z)
+        loss = self.loss_function(z_mean, z_log_var)
+        # loss += F.binary_cross_entropy(z, x, reduction='sum')
+        return z, loss
+        
 
 # Transformer modules
 class CrossTransformer(nn.Module):
@@ -289,24 +324,35 @@ class PreABC(nn.Module):
 class VFMapDecoder(nn.Module):
     def __init__(self) -> None:
         super(VFMapDecoder, self).__init__()
-        self.map_feat_emb = nn.Sequential(nn.Linear(256, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
+        cfg = load_cfg_here()
+        self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+        self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ReLU())
+        self.map_feat_emb = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
         self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
         self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
-        self.transformer = nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,2))
-        self._map_feature = None
-        self._masks = None
+        self.transformer = nn.Sequential(nn.Linear(64, 64), nn.GELU(), nn.Dropout(0.1), nn.Linear(64, 32), nn.LayerNorm(32), nn.GELU(), nn.Linear(32,2))
         
-    def set_latent_feature(self, map_feature):
-        self._map_feature = map_feature[:,0]
+    def set_latent_feature(self, latent_feature):
+        self._map_feature = latent_feature['map_feature']
+        self._agent_map = latent_feature['agent_map']
+        self._agent_agent = latent_feature['agent_agent']
         # self._masks = masks[:,0]
 
     def forward(self, sample):
         # cross attention of self.grid and map_feature
         query = self.emb(sample)
-        map_feature = self.map_feat_emb(self._map_feature)
+        map_feature = self._map_feature.view(self._map_feature.shape[0], -1, self._map_feature.shape[-1])
+        map_feature = torch.amax(map_feature, dim=-2)
+        agent_agent = torch.amax(self._agent_agent, dim=-2)
+        agent_map = torch.amax(self._agent_map, dim=-2)
+
+        feature = torch.cat([map_feature, agent_agent], dim=-1)
+        feature = self.reduce(feature.detach())
+        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
+        feature = self.map_feat_emb(feature)
         x,_ = self.cross_attention(query,
-                                   map_feature,
-                                   map_feature,
+                                   feature,
+                                   feature,
                                 #    key_padding_mask = self._masks
                                    )
         dx_dy = self.transformer(x)
@@ -388,7 +434,7 @@ class VectorField(nn.Module):
             scale_units='inches',
             )
         
-    def get_loss(self, gt, sample):
+    def get_loss(self, gt, sample, context=None):
         # convert to vx,vy
         loss = 0
         # get dx_dy
@@ -397,36 +443,44 @@ class VectorField(nn.Module):
         dx_dy = self.vf_inquery(query.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
         dx_dy_gt = dx_dy[:,0:1]#.clamp(max = 30, min = 0)
         dx_dy_samp = dx_dy[:,1:]
-        dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
+        # dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
         
         # imitation loss
-        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5]) # TODO gt smoothing is not solved
-        # regularization 
-        loss += 1e-2*torch.norm(dx_dy_grid,dim=-1).mean()
-        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_grid, torch.zeros_like(dx_dy_grid))
-        # construct field direction
-        # diff_sample_gt = 0
-        # dis_diff = gt[...,:2]-torch.cat([torch.zeros_like(sample[...,0:1,:2],device=sample.device), 
-        #                                 sample[...,:-1,:2]],
-        #                                 dim=-2)
-        # d_dis_diff = dis_diff/0.1 #Time interval
-        # diff_sample_gt+=d_dis_diff
-        # sample_dxy = torch.stack([torch.cos(sample[...,2])*sample[...,3], 
-        #                             torch.sin(sample[...,2])*sample[...,3]],
-        #                             dim=-1)
-        # diff_sample_gt += gt[...,3:5] - sample_dxy
-        # loss += 1e-1*torch.nn.functional.smooth_l1_loss(dx_dy_samp, diff_sample_gt)
+        # GT velocity prior
+        loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5]) # TODO gt smoothing is not solved
+        # Smaple velocity priorl
+        dis = torch.norm(sample[...,:2]-gt[...,:2],dim=-1)
+        # TODO tuning k number
+        nearest_id = torch.topk(dis.mean(dim=-1), k=50, dim=-1, largest=False, sorted=False).indices
+        # gather debug， follow the integrated terminal
+        nearest_sample = torch.gather(sample,-3,nearest_id.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,4))
+        nearest_sample = yawv2yawdxdy(nearest_sample)
+        dx_dy_nearest = torch.gather(dx_dy_samp,-3,nearest_id.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,2))
+        # weighted loss
+        # farther sample contributs less prior
+        if context:
+            collision = batch_sample_check_collision(nearest_sample, 
+                                                     context['predictions'], 
+                                                     context['current_state'][:, :, 5:],
+                                                     t_stamp=True)
+            nearest_sample[collision][...,3:5] = 0.#-nearest_sample[collision][...,3:5]        
+        nearest_dis = gt[...,:2]-nearest_sample[...,:2]
+        correction = nearest_dis/0.1 # dt
+        discount = torch.exp(-0.5*torch.norm(nearest_dis, dim=-1, keepdim=True)**2) # TODO dis/0.5
+        loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, correction+discount*nearest_sample[...,3:5])
         return loss
     
     def vector_field_diff(self, traj):
         b,s,t,d = traj.shape
+        if d != 4:
+            raise ValueError('Trajectory should be in shape of (batch, sample, time, 4)')
         dx_dy = self.vf_inquery(traj.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
         traj_xy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
                             torch.sin(traj[...,2])*traj[...,3]],
                             dim=-1)
         diff = traj_xy - dx_dy
-        diff = diff**2
-        diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
+        diff = torch.abs(diff)
+        # diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
         return diff
 # %% cost volume
 class CostMapDecoder(nn.Module):

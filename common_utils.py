@@ -90,6 +90,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
     map_lanes = batch[2].to(args.device)
     map_crosswalks = batch[3].to(args.device)
     ref_line_info = batch[4].to(args.device)
+    lattice_sample = batch[6].to(args.device) if batch[6].sum() else None
     current_state = torch.cat([ego.unsqueeze(1), neighbors[..., :-1]], dim=1)[:, :, -1]
     with torch.no_grad():
         us, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
@@ -132,6 +133,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
     
     elif planner.name=='risk':
         # u, prediction = select_future(us, predictions, scores)
+        planner:RiskMapPlanner=planner
         vf_map = predictor.module.vf_map if distributed else predictor.vf_map
         planner_inputs = {
             "predictions": prediction, # prediction for surrounding vehicles 
@@ -139,9 +141,10 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             "current_state": current_state,
             "vf_map": vf_map,
             'init_guess_u': u,
+            'lattice_sample': lattice_sample,
         }
         with torch.no_grad():
-            plan, u = planner.plan(planner_inputs) # control
+            plan, u = planner.plan(planner_inputs, genetic = 10) # control
     elif planner.name=='base':
         u, prediction = select_future(us, predictions, scores)
         plan = init_guess

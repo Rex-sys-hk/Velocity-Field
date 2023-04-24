@@ -1,4 +1,4 @@
-from model.predictor_base import AVDecoder, AVDecoderNc, AttCostMap, PreABC, TConvCostMap, VectorField
+from model.predictor_base import AVDecoder, AVDecoderNc, AttCostMap, PreABC, TConvCostMap, VAEcore, VectorField
 from .meter2risk import CostModules, Meter2Risk 
 
 # Build predictor
@@ -64,9 +64,9 @@ class RiskMapPre(PreABC):
         predictions, scores, 
         cost_function_weights) = self.forward_base(ego, neighbors, map_lanes, map_crosswalks)
         # to be compatible with risk map
-        latent_feature = {'map_feature':map_feature,'agent_map':agent_map}
+        latent_feature = {'map_feature':map_feature,'agent_map':agent_map,'agent_agent':agent_agent}
         self.meter2risk.set_latent_feature(latent_feature)
-        self.vf_map.vf_inquery.set_latent_feature(map_feature)
+        self.vf_map.vf_inquery.set_latent_feature(latent_feature)
         
         return plans, predictions, scores, cost_function_weights
     

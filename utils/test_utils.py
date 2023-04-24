@@ -268,7 +268,7 @@ def batch_check_collision(ego_center_points, neighbor_center_points, sizes):
     collision = torch.where(dis.amin(dim=1)<=0, 1., 0.).amax(dim=-1)
     return collision 
 
-def batch_sample_check_collision(ego_center_points, neighbor_center_points, sizes):
+def batch_sample_check_collision(ego_center_points, neighbor_center_points, sizes, t_stamp = False):
     # collision = False
     plan_x, plan_y, plan_yaw, plan_l, plan_w = ego_center_points[...,0], ego_center_points[...,1], ego_center_points[...,2], sizes[..., 0, 0], sizes[..., 0, 1]
     ego_vehicle = batch_return_circle_list(plan_x, plan_y, plan_l.unsqueeze(1), plan_w.unsqueeze(1), plan_yaw)
@@ -283,6 +283,9 @@ def batch_sample_check_collision(ego_center_points, neighbor_center_points, size
     dis = torch.norm(dis,dim=-1) - _ego_vehicle[...,2] -_neighbor_vehicle[...,2]
     dis = dis.amin(dim = [-1,-2])
     dis = dis + torch.nan_to_num((~masks)*torch.inf,nan=0)
+    if t_stamp:
+        collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).bool()
+        return collision
     collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).amax(dim=-1)
     return collision 
 

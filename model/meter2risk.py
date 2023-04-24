@@ -4,6 +4,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from utils.riskmap.rm_utils import has_nan, load_cfg_here
+import matplotlib.pyplot as plt
+import numpy as np
 debug = False
 
 class Meter2Risk(nn.Module):
@@ -865,15 +867,40 @@ class CostModelTV(Meter2Risk):
         #                 nn.GELU(),
         #                 nn.Linear(128,self.th*self.V_dim),
         #                 ).to(device)
-        self.coeff = nn.Sequential(
-                        nn.Linear(self.th*self.V_dim,self.th*self.V_dim),
-                        ).to(device)
+        # self.coeff = nn.Sequential(
+        #                 nn.Linear(self.V_dim,self.V_dim),
+        #                 ).to(device)
+        self.coeff = nn.Parameter(torch.ones([self.V_dim], device = device))
+        self.t_coeff = torch.ones([self.th],device = device)
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
         b,s,t,d = raw_meters_vec.shape
-        risk = self.coeff(raw_meters_vec.reshape(b,s,t*d)).reshape(b,s,t,d)
-        # risk = torch.nn.functional.normalize(risk,dim=1)
+        risk = torch.softmax(self.coeff,dim=-1)*raw_meters_vec.detach()**2
+        # risk = raw_meters_vec
+        # risk = self.t_coeff(risk.permute(0,1,3,2)).permute(0,1,3,2)
+        risk = torch.softmax(self.t_coeff.to(risk.device),dim=-1)*risk.permute(0,1,3,2)
+        risk = risk.permute(0,1,3,2)
+        # risk = torch.exp(risk)
+        # if 1:
+        #     plt.cla()
+        #     fig,ax = plt.subplots(1,2)
+        #     coeff = self.coeff.cpu().clone()
+        #     coeff = coeff.detach().numpy()[:,None]
+        #     t_coeff = self.t_coeff.cpu().clone()
+        #     t_coeff = t_coeff.detach().numpy()[:,None]
+        #     ax[0].pcolor(coeff, cmap=plt.cm.Blues)
+        #     ax[1].pcolor(t_coeff, cmap=plt.cm.Blues)
+        #     # put the major ticks at the middle of each cell
+        #     for y in range(coeff.shape[0]):
+        #         for x in range(coeff.shape[1]):
+        #             ax[0].text(x + 0.5, y + 0.5, '%.2f' % coeff[y, x],
+        #                     horizontalalignment='center',
+        #                     verticalalignment='center',
+        #                     )
+        #     fig.tight_layout()
+        #     plt.savefig('weight.png')
+        #     plt.close()
         return risk
     
 class CostModel(Meter2Risk):

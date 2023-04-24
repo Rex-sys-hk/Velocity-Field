@@ -93,7 +93,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
 
                 # render
                 if args.render:
-                    simulator.render()
+                    simulator.render(predictor)
 
             # calculate metrics
             collisions.append(info[0])

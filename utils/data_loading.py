@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset
 from utils.data_utils import agent_norm, map_norm, ref_line_norm
-from utils.riskmap.rm_utils import get_u_from_X
+from utils.riskmap.rm_utils import get_u_from_X, load_cfg_here
 from utils.riskmap.torch_lattice import LatticeSampler
 from utils.data_augmentation.kinematic_agent_augmentation import KinematicAgentAugmentor
 from utils.data_augmentation.nuplan_utils.trajectory import Trajectory
@@ -16,10 +16,14 @@ from utils.test_utils import batch_check_collision, check_collision
 
 class DrivingData(Dataset):
     def __init__(self, data_dir, data_aug = False):
+        self.cfg = load_cfg_here()
+        self.plan_sample_num = self.cfg['planner']['plan_sample_num']
         self.data_list = glob.glob(data_dir)
         self.data_aug = data_aug
-        if self.data_aug:
+        self.lattice_sampler = self.cfg['planner']['lattice_sampler']
+        if self.lattice_sampler:
             self.sampler = LatticeSampler()
+        if self.data_aug:
             N = 50
             dt = 0.1
             augment_prob = 1.0
@@ -75,6 +79,12 @@ class DrivingData(Dataset):
                                                                 gt_future_states,
                                                                 viz=False
                                                             )
+        if self.lattice_sampler:  
+            lattice_sample = self.sampler.sampling(ref_line,x=ego[-1,0],y=ego[-1,1],yaw=ego[-1,2],v=np.hypot(ego[-1,3],ego[-1,4]))
+            pad_length = self.plan_sample_num - lattice_sample.shape[0]
+            lattice_sample = np.pad(lattice_sample,((0,pad_length),(0,0),(0,0)),mode='constant',constant_values=np.nan)
+        else:
+            lattice_sample = 0
             # center, angle, ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth, viz=True
             # ego, neighbors, map_lanes, map_crosswalks, ref_line, ground_truth
         # if self.data_aug:
@@ -100,7 +110,7 @@ class DrivingData(Dataset):
             #     plt.title(f'max u: {torch.abs(u[...,0]).max()}')
             #     plt.savefig('./data_aug.png', dpi=400)
 
-        return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states
+        return ego, neighbors, map_lanes, map_crosswalks, ref_line, gt_future_states, lattice_sample
     
     def data_augment(self, ego, gt, neighbors):
         # ## aug ego his

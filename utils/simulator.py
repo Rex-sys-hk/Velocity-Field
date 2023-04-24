@@ -2,16 +2,22 @@ import numpy as np
 import tensorflow as tf
 from data_process import DataProcess
 from utils.riskmap.car import pi_2_pi
+from utils.riskmap.rm_utils import load_cfg_here
+from utils.riskmap.torch_lattice import LatticeSampler
 from utils.test_utils import *
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 
 class Simulator(DataProcess):
     def __init__(self, timespan):
+        self.cfg = load_cfg_here()
+        self.plan_sample_num = self.cfg['planner']['plan_sample_num']
+        self.lattice_sampler = self.cfg['planner']['lattice_sampler']
         self.num_neighbors = 10
         self.hist_len = 20
         self.future_len = 50
         self.timespan = timespan      
+        self.sampler = LatticeSampler() if self.lattice_sampler else None 
         
     def load_scenario(self, scenario):
         self.scenario = scenario
@@ -114,6 +120,13 @@ class Simulator(DataProcess):
         ground_truth = self.ground_truth_process(self.sdc_id, timestep, self.tracks)
         gt_future_states = ground_truth.copy()
         ego, neighbors, map, map_crosswalk, ref_line, ground_truth = self.normalize_data(ego, neighbors, agent_map, agent_map_crosswalk, ref_line, ground_truth, viz=False)
+        if self.lattice_sampler:
+            lattice_sample = self.sampler.sampling(ref_line,x=ego[-1,0],y=ego[-1,1],yaw=ego[-1,2],v=np.hypot(ego[-1,3],ego[-1,4]))
+            pad_length = self.plan_sample_num - lattice_sample.shape[0]
+            lattice_sample = np.pad(lattice_sample,((0,pad_length),(0,0),(0,0)),mode='constant',constant_values=np.inf)
+            lattice_sample = np.expand_dims(lattice_sample, axis=0)   
+        else:
+            lattice_sample = np.array([0])
 
         ego = np.expand_dims(ego, axis=0).astype(np.float32)
         neighbors = np.expand_dims(neighbors, axis=0)
@@ -125,7 +138,7 @@ class Simulator(DataProcess):
         self.ground_truth = ground_truth
         self.gt_future_states = gt_future_states
         
-        return ego, neighbors, map_lanes, map_crosswalk, ref_line
+        return ego, neighbors, map_lanes, map_crosswalk, ref_line, np.array([0]), lattice_sample
 
     def check_collision(self):
         collision = []
@@ -188,7 +201,7 @@ class Simulator(DataProcess):
 
         return error, human
 
-    def render(self):
+    def render(self, custom = None):
         plt.ion()
         ax = plt.gca()
         fig = plt.gcf()
