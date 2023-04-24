@@ -15,7 +15,7 @@ import math
 from torch import mode, nn, true_divide
 
 from utils.train_utils import project_to_frenet_frame
-from .car import WB, bicycle_model, pi_2_pi, pi_2_pi_pos
+from .car import MAX_ACC, MAX_STEER, WB, bicycle_model, pi_2_pi, pi_2_pi_pos
 from math import cos, sin, tan, pi
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -684,7 +684,7 @@ def get_u_from_X(X, init_state, dt = 0.1, L = WB):
     a = torch.diff(v,dim=-1)/dt
     d_theta = pi_2_pi(torch.diff(_X[...,2],dim=-1)/dt)
     steering = torch.atan2(L*d_theta,v[...,1:])
-    steering = torch.nan_to_num(steering,nan=0.)
+    # steering = torch.nan_to_num(steering,nan=0.)
     steering = pi_2_pi(steering)
     u = torch.stack([a,steering],dim=-1)
     return u

@@ -21,7 +21,7 @@ R = W/2.0
 LF = 3.3  # distance from rear to vehicle front end
 LB = 1.0  # distance from rear to vehicle back end
 MAX_STEER = 0.6  # [rad] maximum steering angle
-MAX_ACC = 8
+MAX_ACC = 4.  # [m/s^2] maximum acceleration 
 BUBBLE_DIST = (LF - LB) / 2.0  # distance from rear to center of vehicle.
 BUBBLE_R = np.hypot((LF + LB) / 2.0, W / 2.0)  # bubble radius
 
@@ -208,7 +208,7 @@ def bicycle_model(control, current_state):
     delta = control[..., 1].clamp(-max_delta, max_delta) # vehicle's steering [rad]
     # speed
     v = v_0.unsqueeze(-1) + torch.cumsum(a * dt, dim=-1)
-    # v = torch.clamp(v, min=0)
+    v = torch.clamp(v, min=0)
 
     # angle
     d_theta = v * torch.tan(delta) / L # use delta to approximate tan(delta)
