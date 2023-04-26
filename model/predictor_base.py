@@ -1,10 +1,17 @@
 import torch
-from torch import int64, long, nn
+from torch import embedding, int64, long, nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from utils.riskmap.car import MAX_ACC, MAX_STEER
 from utils.riskmap.rm_utils import has_nan, load_cfg_here, standardize_vf, yawv2yawdxdy
 from utils.test_utils import batch_sample_check_collision
+
+def time_embeding(traj):
+    b,s,th,d = traj.shape
+    t = torch.linspace(0, 1, th, device=traj.device).reshape(1, 1, th, 1).repeat(b, s, 1, 1)
+    st = torch.sin(2 * torch.pi * t)
+    ct = torch.cos(2 * torch.pi * t)
+    return torch.cat([traj, t, st, ct], dim=-1)
 # Agent history encoder
 class AgentEncoder(nn.Module):
     def __init__(self):
@@ -325,10 +332,12 @@ class VFMapDecoder(nn.Module):
     def __init__(self) -> None:
         super(VFMapDecoder, self).__init__()
         cfg = load_cfg_here()
+        self.time_embedding = cfg['model_cfg']['time_embedding'] if 'time_emedding' in cfg['model_cfg'] else False
+        self.time_embdim = 5 if self.time_embedding else 2
         self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ReLU())
         self.map_feat_emb = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
-        self.emb = nn.Sequential(nn.Linear(2, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
+        self.emb = nn.Sequential(nn.Linear(self.time_embdim, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
         self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
         self.transformer = nn.Sequential(nn.Linear(64, 64), nn.GELU(), nn.Dropout(0.1), nn.Linear(64, 32), nn.LayerNorm(32), nn.GELU(), nn.Linear(32,2))
         
@@ -340,7 +349,10 @@ class VFMapDecoder(nn.Module):
 
     def forward(self, sample):
         # cross attention of self.grid and map_feature
-        query = self.emb(sample)
+        # TODO : add time embedding here
+        b,s,th,d = sample.shape
+        query = time_embeding(sample[...,:2]) if self.time_embedding else sample[...,:2]
+        query = self.emb(query.reshape(b,-1,self.time_embdim))
         map_feature = self._map_feature.view(self._map_feature.shape[0], -1, self._map_feature.shape[-1])
         map_feature = torch.amax(map_feature, dim=-2)
         agent_agent = torch.amax(self._agent_agent, dim=-2)
@@ -377,7 +389,7 @@ class VectorField(nn.Module):
     
     def plot(self, samples):
         b,s,t,d = samples.shape
-        sample_dx_dy = self.vf_inquery(samples.reshape(b,-1,d)[...,:2])#.reshape(b,s,t,2)
+        sample_dx_dy = self.vf_inquery(samples[...,:2])#.reshape(b,s,t,2)
         sample_dx_dy, m = standardize_vf(sample_dx_dy)
         plt.quiver(samples.reshape(b,-1,d)[0,::7,0].cpu().detach(), 
             samples.reshape(b,-1,d)[0,::7,1].cpu().detach(),
@@ -391,8 +403,8 @@ class VectorField(nn.Module):
             alpha=0.2,
             scale_units='inches',
             )
-        
-        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1))[0]
+        # vis vector field at time 0
+        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1).unsqueeze(-2))[0]
         dx_dy, m = standardize_vf(dx_dy)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
@@ -419,8 +431,6 @@ class VectorField(nn.Module):
                                   dim=-1)
         diff_sample_gt += gt[...,3:5] - sample_dxy
         diff_sample_gt, m = standardize_vf(diff_sample_gt)
-        # plt.scatter(samples[0,...,0].cpu().detach(),
-        #     samples[0,...,1].cpu().detach())
         plt.quiver(samples[0,...,0].cpu().detach(),
             samples[0,...,1].cpu().detach(),
             diff_sample_gt[0,...,0].cpu().detach(),
@@ -434,13 +444,13 @@ class VectorField(nn.Module):
             scale_units='inches',
             )
         
-    def get_loss(self, gt, sample, context=None):
+    def get_loss(self, gt, sample, context=None, k = 30):
         # convert to vx,vy
         loss = 0
         # get dx_dy
         query = torch.cat([gt[...,:2],sample[...,:2]],dim=1)
         b,s,t,d = query.shape
-        dx_dy = self.vf_inquery(query.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
+        dx_dy = self.vf_inquery(query[...,:2]).reshape(b,s,t,2)
         dx_dy_gt = dx_dy[:,0:1]#.clamp(max = 30, min = 0)
         dx_dy_samp = dx_dy[:,1:]
         # dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
@@ -449,9 +459,9 @@ class VectorField(nn.Module):
         # GT velocity prior
         loss += torch.nn.functional.smooth_l1_loss(dx_dy_gt, gt[...,3:5]) # TODO gt smoothing is not solved
         # Smaple velocity priorl
-        dis = torch.norm(sample[...,:2]-gt[...,:2],dim=-1)
+        dis = torch.norm(sample[...,:3]-gt[...,:3],dim=-1)
         # TODO tuning k number
-        nearest_id = torch.topk(dis.mean(dim=-1), k=50, dim=-1, largest=False, sorted=False).indices
+        nearest_id = torch.topk(dis.mean(dim=-1), k=k, dim=-1, largest=False, sorted=False).indices
         # gather debug， follow the integrated terminal
         nearest_sample = torch.gather(sample,-3,nearest_id.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,4))
         nearest_sample = yawv2yawdxdy(nearest_sample)
@@ -463,22 +473,25 @@ class VectorField(nn.Module):
                                                      context['predictions'], 
                                                      context['current_state'][:, :, 5:],
                                                      t_stamp=True)
-            nearest_sample[collision][...,3:5] = 0.#-nearest_sample[collision][...,3:5]        
-        nearest_dis = gt[...,:2]-nearest_sample[...,:2]
-        correction = nearest_dis/0.1 # dt
-        discount = torch.exp(-0.5*torch.norm(nearest_dis, dim=-1, keepdim=True)**2) # TODO dis/0.5
-        loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, correction+discount*nearest_sample[...,3:5])
+            nearest_sample[collision][...,3:5] = 0.#-nearest_sample[collision][...,3:5]
+        # core vf map construction loss  
+        nearest_dis = gt[...,:3]-nearest_sample[...,:3]
+        discount = torch.exp(-0.5*torch.norm(nearest_dis, dim=-1, keepdim=True)**2)
+        correction = nearest_dis[...,:2]/0.1 # dt
+        correction_discount = torch.exp(-0.5*torch.norm(nearest_dis[...,:2], dim=-1, keepdim=True)**2)
+        loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, 
+                                                   correction_discount*correction+discount*nearest_sample[...,3:5])
         return loss
     
     def vector_field_diff(self, traj):
         b,s,t,d = traj.shape
         if d != 4:
             raise ValueError('Trajectory should be in shape of (batch, sample, time, 4)')
-        dx_dy = self.vf_inquery(traj.reshape(b,-1,d)[...,:2]).reshape(b,s,t,2)
-        traj_xy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
+        traj_dxy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
                             torch.sin(traj[...,2])*traj[...,3]],
                             dim=-1)
-        diff = traj_xy - dx_dy
+        dx_dy = self.vf_inquery(traj).reshape(b,s,t,2)
+        diff = traj_dxy - dx_dy
         diff = torch.abs(diff)
         # diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
         return diff
@@ -489,7 +502,7 @@ class CostMapDecoder(nn.Module):
         cfg = load_cfg_here()
         self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         # self.map_feat_emb = nn.Sequential(nn.Linear(256*9, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
-        self.emb = nn.Sequential(nn.Linear(6, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
+        self.emb = nn.Sequential(nn.Linear(5, 32),nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 64),nn.ReLU(), nn.Dropout(0.1),nn.Linear(64, 64))
         self.cross_attention = nn.MultiheadAttention(64, 4, 0.1, batch_first=True)
         self.transformer = nn.Sequential(nn.Linear(64, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 64), nn.LayerNorm(64), nn.ReLU(), nn.Linear(64,1))
         self.reduce = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 256), nn.ELU())
@@ -615,7 +628,8 @@ class STCostMap(nn.Module):
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
         t = torch.linspace(self.resolution_t, self.real_t, self.th) # 5.0 s-->50 steps
         x,y,t = torch.meshgrid(s,l,t,indexing='xy')
-        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
+        emb_t = (t/self.th)*2*torch.pi
+        self.grid_points = torch.stack([ x, y, emb_t, torch.sin(emb_t), torch.sin(emb_t)],dim=-1)
         self.cost_map = None
         self.cost = None #CostMapDecoder()
 
@@ -629,12 +643,13 @@ class STCostMap(nn.Module):
     def get_cost_by_pos(self,samples):
         btsz, sample, th, dim = samples.shape
         t = torch.linspace(self.real_t/th, self.real_t, th).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
+        emb_t = (t/self.th)*2*torch.pi
         # grid map utils
         # idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
         # cost = torch.stack([self.cost_map[i,m] for i,m in enumerate(idx)],dim=0)
         # inquiry utils
         samples = samples.view(btsz,-1,dim)
-        query = [samples[...,0], samples[...,1], t, torch.sin(samples[...,0]), torch.sin(samples[...,1]), torch.sin(t)]
+        query = [samples[...,0], samples[...,1], emb_t, torch.sin(emb_t), torch.sin(emb_t)]
         query = torch.stack(query, dim=-1)
         cost = self.cost(query)
         return cost.view(btsz, sample, th, 1)
@@ -701,7 +716,8 @@ class AttCostMap(STCostMap):
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)
         t = torch.linspace(self.resolution_t, self.real_t, self.th) # 5.0 s-->50 steps
         x,y,t = torch.meshgrid(s,l,t,indexing='xy')
-        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
+        emb_t = (t/self.th)*2*torch.pi
+        self.grid_points = torch.stack([ x, y, emb_t, torch.sin(emb_t), torch.sin(emb_t)],dim=-1)
         
         
         
@@ -723,7 +739,8 @@ class TConvCostMap(STCostMap):
         l = torch.linspace(-self.side_range,self.side_range,self.steps_l)[::10]
         t = torch.linspace(self.resolution_t, self.real_t, self.th)
         x,y,t = torch.meshgrid(s,l,t,indexing='xy')
-        self.grid_points = torch.stack([ x, y, t, torch.sin(x), torch.sin(y), torch.sin(t)],dim=-1)
+        emb_t = (t/self.th)*2*torch.pi
+        self.grid_points = torch.stack([ x, y, emb_t, torch.sin(emb_t), torch.sin(emb_t)],dim=-1)
 
     def metric2index(self, s, l, t):
         idx_s = torch.round((s+self.rear_range)/self.resolution_s).clip(0,self.steps_s-1)

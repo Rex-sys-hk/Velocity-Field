@@ -64,7 +64,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # plan
         if not use_planning:
             plan, prediction = select_future(plan_trajs, predictions, best_mode)
-        ## DEPRECATED
+        ## BASELINE
+        elif planner.name=='base':
+            loss += imitation_loss(init_guess, ground_truth)
+            # loss+=0.1*F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1])) # reduce steering
+            plan = init_guess
+        ## DIPP
         elif planner.name=='dipp':
             planner: MotionPlanner = planner
             planner_inputs = {
@@ -87,26 +92,25 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
-            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            loss += F.smooth_l1_loss(u, gt_u)
-            # loss+=imitation_loss(init_guess, ground_truth)
+            loss+=imitation_loss(init_guess, ground_truth)
+            # loss+=0.1*F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1])) # reduce steering
             planner_inputs = {
                 # "control_variables": u.view(-1, 100), # initial control sequence
                 "predictions": prediction.detach(), # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
                 "current_state": current_state, # including neighbor cars
                 'init_guess_u': u.detach().clone(),
+                "lattice_sample": lattice_sample,
             }
-            plan,u = planner.plan(planner_inputs)
+            with torch.no_grad():
+                plan,u = planner.plan(planner_inputs, genetic = cfg['planner']['train_genetic'])
             loss += planner.get_loss(ground_truth[...,0:1,:,:], tb_iter=tb_iters, tb_writer=tbwriter)
         ## RISK
         elif planner.name=='risk':
             planner:RiskMapPlanner = planner
             vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
-            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            # loss += F.smooth_l1_loss(u, gt_u)
             loss += imitation_loss(init_guess, ground_truth)
-            loss += F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1]))
+            # loss+=0.1*F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1])) # reduce steering
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
                 "ref_line_info": ref_line_info,
@@ -116,7 +120,8 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "lattice_sample": lattice_sample,
             }
             # plan loss
-            plan, _ = planner.plan(planner_inputs) # control
+            with torch.no_grad():
+                plan, _ = planner.plan(planner_inputs, genetic = cfg['planner']['train_genetic']) # control
             loss += planner.get_loss(ground_truth[...,0:1,:,:],
                                      tb_iters,
                                      tbwriter)
@@ -127,8 +132,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         elif planner.name=='nmp':
             planner:CostMapPlanner = planner
             cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
-            gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            loss += F.smooth_l1_loss(u, gt_u)
+            loss+=0.1*F.smooth_l1_loss(u[...,-1],torch.zeros_like(u[...,-1])) # reduce steering
             # loss += imitation_loss(init_guess, ground_truth)
             planner_inputs = {
                 "predictions": prediction, # prediction for surrounding vehicles 
@@ -136,18 +140,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 "current_state": current_state,
                 "cost_map": cost_map,
                 'init_guess_u': u.detach().clone(),
+                "lattice_sample": lattice_sample,
             }
             # plan loss
-            plan, _ = planner.plan(planner_inputs) # control
+            with torch.no_grad():
+                plan, _ = planner.plan(planner_inputs, genetic = cfg['planner']['train_genetic']) # control
             loss += planner.get_loss(ground_truth[...,0:1,:,:],
                                      tb_iters,
                                      tbwriter)
-        ## BASELINE
-        elif planner.name=='base':
-            # gt_u = get_u_from_X(ground_truth[:,0,...,:2], ego[:,-1])
-            # loss += F.smooth_l1_loss(u, gt_u)
-            loss += imitation_loss(init_guess, ground_truth)
-            plan = init_guess
         # loss backward
         loss.backward()
         nn.utils.clip_grad_norm_(predictor.parameters(), 5)

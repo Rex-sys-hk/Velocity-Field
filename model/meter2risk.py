@@ -859,29 +859,14 @@ class SimpleCostCoef(Meter2Risk):
 class CostModelTV(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
-        # self.coeff = nn.Sequential(
-        #                 nn.Linear(self.th*self.V_dim,128),
-        #                 nn.GELU(),
-        #                 nn.Linear(128,128),
-        #                 nn.Dropout(0.1),
-        #                 nn.GELU(),
-        #                 nn.Linear(128,self.th*self.V_dim),
-        #                 ).to(device)
-        # self.coeff = nn.Sequential(
-        #                 nn.Linear(self.V_dim,self.V_dim),
-        #                 ).to(device)
         self.coeff = nn.Parameter(torch.ones([self.V_dim], device = device))
-        self.t_coeff = torch.ones([self.th],device = device)
+        self.t_coeff = nn.Parameter(torch.ones([self.th],device = device))
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
-        b,s,t,d = raw_meters_vec.shape
-        risk = torch.softmax(self.coeff,dim=-1)*raw_meters_vec.detach()**2
-        # risk = raw_meters_vec
-        # risk = self.t_coeff(risk.permute(0,1,3,2)).permute(0,1,3,2)
+        risk = torch.softmax(self.coeff,dim=-1)*raw_meters_vec**2
         risk = torch.softmax(self.t_coeff.to(risk.device),dim=-1)*risk.permute(0,1,3,2)
         risk = risk.permute(0,1,3,2)
-        # risk = torch.exp(risk)
         # if 1:
         #     plt.cla()
         #     fig,ax = plt.subplots(1,2)
@@ -906,22 +891,12 @@ class CostModelTV(Meter2Risk):
 class CostModel(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
-        # self.coeff = nn.Sequential(
-        #                 nn.Linear(1*self.V_dim,128),
-        #                 nn.GELU(),
-        #                 nn.Linear(128,128),
-        #                 nn.Dropout(0.1),
-        #                 nn.GELU(),
-        #                 nn.Linear(128,1*self.V_dim),
-        #                 ).to(device)
-        self.coeff = nn.Sequential(
-                        nn.Linear(1*self.V_dim,1*self.V_dim),
-                        ).to(device)
+        self.coeff = nn.Parameter(torch.ones([self.V_dim], device = device))
 
     def forward(self, raw_meters):
         raw_meters_vec = torch.cat([raw_meters[key] for key in raw_meters.keys()],dim=-1)
-        b,s,t,d = raw_meters_vec.shape
-        return self.coeff(raw_meters_vec.mean(dim=-2)).reshape(b,s,1,d)
+        risk = torch.softmax(self.coeff,dim=-1)*raw_meters_vec**2
+        return risk
     
 class Coefficient(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:

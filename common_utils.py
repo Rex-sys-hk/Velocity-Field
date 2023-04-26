@@ -99,6 +99,11 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
         init_guess, prediction = select_future(plan_trajs, predictions, scores)
     if not use_planning:
         plan, prediction = select_future(plan_trajs, predictions, scores)
+
+    elif planner.name=='base':
+        u, prediction = select_future(us, predictions, scores)
+        plan = init_guess
+
     elif planner.name=='dipp':
         u, prediction = select_future(us, predictions, scores)
 
@@ -119,17 +124,15 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             plan = bicycle_model(plan, ego[:, -1])[:, :, :3]
 
     elif planner.name=='esp':
-            planner:EularSamplingPlanner=planner
-            # u, prediction = select_future(us, predictions, scores)
-
-            planner_inputs = {
-                "predictions": prediction.detach(), # prediction for surrounding vehicles 
-                "ref_line_info": ref_line_info,
-                "current_state": current_state, # including neighbor cars
-                'init_guess_u': u,
-            }
-
-            plan,u = planner.plan(planner_inputs)
+        planner:EularSamplingPlanner=planner
+        planner_inputs = {
+            "predictions": prediction.detach(), # prediction for surrounding vehicles 
+            "ref_line_info": ref_line_info,
+            "current_state": current_state, # including neighbor cars
+            'init_guess_u': u,
+            'lattice_sample': lattice_sample,
+        }
+        plan,u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic'])
     
     elif planner.name=='risk':
         # u, prediction = select_future(us, predictions, scores)
@@ -144,10 +147,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             'lattice_sample': lattice_sample,
         }
         with torch.no_grad():
-            plan, u = planner.plan(planner_inputs, genetic = 10) # control
-    elif planner.name=='base':
-        u, prediction = select_future(us, predictions, scores)
-        plan = init_guess
+            plan, u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic']) # control
         # plan = bicycle_model(u, ego[:, -1])[:, :, :3]
     elif planner.name=='nmp':
         planner:CostMapPlanner = planner
@@ -160,10 +160,11 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             "current_state": current_state,
             "cost_map": cost_map,
             'init_guess_u': u.detach().clone(),
+            'lattice_sample': lattice_sample,
         }
         # plan loss
         with torch.no_grad():
-            plan, _ = planner.plan(planner_inputs) # control
+            plan, _ = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic']) # control
     ## smoothing
     if parallel=='none':
         return plan, prediction

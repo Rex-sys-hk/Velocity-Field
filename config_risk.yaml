@@ -4,19 +4,21 @@ model_cfg:
   future_steps: 50
   mode_num: 8
   gamma: 0.99
+  time_embedding: True
 
 planner: 
   name: 'risk'
-  cost_items: 3
   time_horizon: 50 # same as future_steps
 
-  cov_base: [0.3, 0.1]
+  cov_base: [0.2, 0.2]
   cov_inc: [0., 0.] #1.e-4
   const_turb: True
   gt_sample_num: 30
-  plan_sample_num: 200 # no less than 220
+  plan_sample_num: 200 # no less than 200
   lattice_sampler: True
   collision_check: False
+  train_genetic: 3
+  inference_genetic: 10
 
   meter2risk: 
     name: 'CostModelTV'
@@ -27,8 +29,8 @@ planner:
     # TVC: False
   
   loss:
-    dis_prob: False
-    gt_label: True #not recomended
+    dis_prob: True
+    gt_label: False #not recomended
     nmp_loss: False
   
   risk_preference: [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]

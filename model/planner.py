@@ -16,13 +16,12 @@ try:
 except:
     logging.warning('[WARNING] theseus is not implemented')
 from utils.train_utils import project_to_frenet_frame
-from utils.riskmap.map import Map
 from model.meter2risk import Meter2Risk
 from utils.riskmap.rm_utils import get_u_from_X, has_nan, load_cfg_here, yawv2yawdxdy
 
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
-def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=100, turb_num=1, no_ref=True):
+def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=100, turb_num=1, no_ref=True, use_lattice=False, add_noref:int=0):
     cov = cov.to(context['init_guess_u'].device)
     lim = torch.tensor([MAX_ACC, MAX_STEER],device = context['init_guess_u'].device)
     cov = cov*lim
@@ -32,27 +31,33 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
     init_guess_u=init_guess_u.unsqueeze(1) if len(init_guess_u.shape)==3 else init_guess_u
     init_guess_u[...,1] = pi_2_pi(init_guess_u[...,1])
     if init_guess_u.shape[1]>1:
-        u = (torch.randn([btsz,1,sample_num,turb_num,2],device = init_guess_u.device)*cov)+init_guess_u.unsqueeze(2)
+        # implement same noise to topk initguess
+        u = (torch.randn([btsz,init_guess_u.shape[1],sample_num,turb_num,2])*cov) \
+            +init_guess_u.unsqueeze(2).repeat(1,1,sample_num,1,1)
         u = u.reshape(btsz,-1,50,2)
     else:
-        u = (torch.randn([btsz,sample_num,turb_num,2],device = init_guess_u.device)*cov)+init_guess_u
+        u = (torch.randn([btsz,sample_num,turb_num,2])*cov)+init_guess_u
+    if add_noref and add_noref<u.shape[-3]:
+        u = torch.cat([u,cov*torch.randn_like(u[:,0:add_noref,:,:])],dim=-3)
     u = u.clamp(min=-lim, max=lim)
     cur_state = context['current_state'][:,0:1]
     X = bicycle_model(u,cur_state)
     u = torch.cat([init_guess_u,u],dim=-3)
     X = torch.cat([bicycle_model(init_guess_u,cur_state),X],dim=-3)
-    if 'lattice_sample' not in context:
+    if 'lattice_sample' not in context or not use_lattice:
         return {'X':X,'u':u} 
     if context['lattice_sample'] is not None:
         lim = torch.tensor([MAX_ACC,MAX_STEER],device = X.device)
         l_trajs = context['lattice_sample']
+        if add_noref and add_noref<=u.shape[-3]:
+            l_trajs = torch.cat([l_trajs,torch.nan*torch.ones_like(l_trajs[:,0:add_noref,:,:])],dim=-3)
         # l_trajs = torch.nan_to_num(l_trajs, nan=np.inf)
         l_u = get_u_from_X(l_trajs, cur_state.repeat(1,l_trajs.shape[1],1))
         # True standfor padded place
         masks = l_trajs.sum(dim=[-2,-1]).isnan() + l_u.sum(dim=[-2,-1]).isnan() \
             + l_trajs.sum(dim=[-2,-1]).isinf() + l_u.sum(dim=[-2,-1]).isinf() \
             + (l_u>lim).amax(dim=[-2,-1]) + (l_u<-lim).amax(dim=[-2,-1])
-            
+        masks = masks.bool()
         l_trajs[masks] = 0.
         X[:,1:][~masks] = 0.
         X[:,1:] = l_trajs + X[:,1:]
@@ -61,30 +66,113 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
         u[:,1:] = l_u + u[:,1:]
     return {'X':X,'u':u}
 
-def sample_loss(CE, sample, gt, costs, cfg, tk=10):
+def sample_loss(CE, sample, gt, costs, cfg, tk=0, interval=10):
     loss = 0
+    traj_risk = costs[:,::interval]
     if not(cfg['loss']['dis_prob'] or cfg['loss']['gt_label']):
         return loss
     diffXd = torch.norm(
-        sample['X'][:,1:,..., :2] - gt[..., :2], dim=-1)
-    diffXd = torch.nn.functional.normalize(diffXd,dim=1)
-    diffXd = torch.topk(diffXd.mean(dim=-1), tk, dim=1)
-
-    traj_risk = torch.mean(costs[:, 1:],dim=-1)
-    # traj_risk = torch.topk(traj_risk, 10, dim=1)
-    traj_risk = torch.stack([traj_risk[i,diffXd.indices[i]]for i in range(traj_risk.shape[0])],dim=0)
-    traj_risk = torch.cat([costs[:,0:1].mean(dim=-1),traj_risk],dim=1)
+        sample['X'][:,::interval,..., :3] - gt[..., :3], dim=-1)
+    diffXd = torch.log(torch.nn.functional.normalize(diffXd,dim=1)+1)
+    
+    if tk:
+        diffXd, Xd_id_best = torch.topk(diffXd.mean(dim=-1), k=tk, dim=1, largest=False, sorted=False)
+        traj_risk = torch.mean(traj_risk,dim=[-1])
+        traj_risk = torch.gather(traj_risk,1,Xd_id_best)
+    traj_risk = torch.log(torch.nn.functional.normalize(traj_risk,dim=1)+1)
+    
     prob = torch.softmax(-traj_risk, dim=1)
+    dis_prob = torch.softmax(-diffXd, dim=1)
     if cfg['loss']['dis_prob']:
         # smoothed distance loss
-        diffXd = torch.cat([torch.zeros_like(diffXd.values[:,0:1]),diffXd.values],dim=1)
-        dis_prob = torch.softmax(-diffXd, dim=1)
         loss += CE(prob, dis_prob)
     if cfg['loss']['gt_label']:
         # label loss
+        # can only be enbaled when gt is provided
         label = torch.zeros_like(prob[:,0]).long()
         loss += CE(prob, label)
     return loss
+
+def selector(raw_costs, sample_plan, k=1, hand_prefer=torch.ones([15])):
+    costs = raw_costs*hand_prefer[:raw_costs.shape[-1]].to(raw_costs.device)
+    i = torch.topk(costs.mean(dim=[-1,-2]),k=k,dim=1,largest=False).indices
+    sampleX = sample_plan['X']
+    sampleu = sample_plan['u']
+    _,_,t,d = sampleX.shape
+    _,_,_,du = sampleu.shape
+    X = torch.gather(sampleX,1,i.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,d))
+    u = torch.gather(sampleu,1,i.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,du))
+    return X.squeeze(1),u.squeeze(1) #torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
+
+def sampling_plan(context, meter2risk, measure, 
+                  genetic=0, 
+                  plan_sample_num=200, 
+                  cov_base=torch.tensor([0.2,0.2]), 
+                  turb_num=50, 
+                  no_ref=False, 
+                  use_lattice=True, 
+                  add_noref=30, 
+                  collision_check=False):
+    new_context = {'init_guess_u': context['init_guess_u'].clone().detach(),
+                    'lattice_sample': context['lattice_sample'].clone().detach(),
+                    'current_state': context['current_state'].clone().detach(),
+                    }
+    
+    if genetic:
+        for i in range(genetic):
+            sample_plan = get_sample(new_context, 
+                                        sample_num=plan_sample_num if i==0 else 30, 
+                                        cov=cov_base,
+                                        turb_num=turb_num if i==0 else 50,
+                                        no_ref=no_ref,
+                                        use_lattice=use_lattice if i==0 else False,
+                                        add_noref=add_noref,
+                                        )
+            meter = measure(
+                            sample_plan, 
+                            context['current_state'], 
+                            context['predictions'], 
+                            context['ref_line_info'], 
+                            context['vf_map']
+                            )
+            costs = meter2risk(meter) if meter2risk is not None else meter
+            # if not self.training:
+            if collision_check:
+                collide = batch_sample_check_collision(sample_plan['X'], context['predictions'], context['current_state'][..., 5:]).bool()
+                collide = collide.unsqueeze(-1).unsqueeze(-1)*torch.inf
+                collide = torch.nan_to_num(collide, nan=0)
+            else:
+                collide = torch.zeros([1],device=sample_plan['X'].device)
+            plan_result = selector(costs, sample_plan, k=10)
+            new_context['init_guess_u'] = plan_result[1]
+            # new_context.pop('lattice_sample', None)
+    sample_plan = get_sample(new_context, 
+                                    sample_num=plan_sample_num if not genetic else 30, 
+                                    cov=cov_base,
+                                    turb_num=turb_num if not genetic else 50,
+                                    no_ref=no_ref,
+                                    use_lattice=use_lattice if not genetic else False,
+                                    add_noref=30,
+                                    )
+    # if not self.training:
+    if collision_check:
+        collide = batch_sample_check_collision(sample_plan['X'],context['predictions'], context['current_state'][..., 5:]).bool()
+        collide = collide.unsqueeze(-1).unsqueeze(-1)*torch.inf
+        collide = torch.nan_to_num(collide, nan=0)
+    else:
+        collide = torch.zeros([1],device=sample_plan['X'].device)
+    # else:
+    # collide = torch.zeros_like(self.sample_plan['X'][...,0:1],device=self.device)
+    meter = measure(
+                sample_plan, 
+                context['current_state'], 
+                context['predictions'], 
+                context['ref_line_info'], 
+                context['vf_map']
+                )
+    costs = meter2risk(meter) if meter2risk is not None else meter
+    plan_result = selector(costs+collide, sample_plan)
+    return plan_result, sample_plan
 
 class Planner:
     def __init__(self, device='cuda:0', test=False) -> None:
@@ -163,42 +251,25 @@ class EularSamplingPlanner(Planner):
         except:
             logging.warning('cov_base amd conv_inc not define')
     
-    def selector(self, costs, sample_plan):
-        i = torch.argmin(costs,dim=1)
-        X,u = [],[]
-        sampleX = sample_plan['X']
-        sampleu = sample_plan['u']
-        for ii,m in enumerate(i.cpu()):
-            X.append(sampleX[ii,m])
-            u.append(sampleu[ii,m])
-        X = torch.stack(X,dim=0)
-        u = torch.stack(u,dim=0)
-        return X,u
-
-    def plan(self, context):
+    def plan(self, context, genetic=0):
         self.context = context
-        self.sample_plan = get_sample(context, 
-                                    cov = self.cov_base, 
-                                    sample_num=self.plan_sample_num, 
-                                    turb_num=self.turb_num)
-        cost = cost_function_sample(self.sample_plan['u'], 
-                                          context['current_state'], 
-                                          context['predictions'], 
-                                          context['ref_line_info'], 
-                                          )
-        cost = self.cost_function_weights(cost)
-        self.plan_result = self.selector(cost.mean(dim=[-1,-2]), self.sample_plan)
+        self.plan_result, self.sample_plan = sampling_plan(self.context, 
+                             self.cost_function_weights,
+                             cost_function_sample,
+                             genetic=genetic,
+                             plan_sample_num=self.plan_sample_num,
+                             cov_base=self.cov_base,
+                             turb_num=self.turb_num,
+                             use_lattice=True,
+                             collision_check=self.collision_check,
+                            )
         return self.plan_result
 
     def get_loss(self, gt, tb_iter=0, tb_writer=None):
         """
         must be called after forward
         """
-        u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        self.gt_sample = get_sample(self.context,u.squeeze(1), 
-                                         cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.plan_sample_num,
-                                         turb_num=self.turb_num)
+        self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
         cost = cost_function_sample(self.gt_sample['u'], 
                                     self.context['current_state'], 
                                     self.context['predictions'], 
@@ -257,79 +328,22 @@ class RiskMapPlanner(Planner):
 
     def plan(self, context, genetic:int = 0):
         self.context = context
-        new_context = deepcopy(context)
-        if genetic:
-            for i in range(genetic):
-                self.sample_plan = get_sample(new_context, 
-                                            sample_num=self.plan_sample_num if i==0 else 30, 
-                                            cov=self.cov_base,
-                                            turb_num=self.turb_num if i==0 else 50,
-                                            no_ref=False
-                                            )
-                self.meter = risk_cost_function_sample(
-                                                    self.sample_plan, 
-                                                    self.context['current_state'], 
-                                                    self.context['predictions'], 
-                                                    self.context['ref_line_info'], 
-                                                    self.context['vf_map']
-                                                    )
-                self.risks = self.meter2risk(self.meter)
-                # if not self.training:
-                if self.collision_check:
-                    collide = batch_sample_check_collision(self.sample_plan['X'], self.context['predictions'], self.context['current_state'][..., 5:]).bool()
-                    collide = collide.unsqueeze(-1).unsqueeze(-1)*torch.inf
-                    collide = torch.nan_to_num(collide, nan=0)
-                else:
-                    collide = torch.zeros([1],device=self.sample_plan['X'].device)
-                self.plan_result = self.selector(self.risks, self.sample_plan, k=10)
-                new_context['init_guess_u'] = self.plan_result[1]
-                new_context.pop('lattice_sample', None)
-        self.sample_plan = get_sample(new_context, 
-                                      sample_num=self.plan_sample_num, 
-                                      cov=self.cov_base,
-                                      turb_num=self.turb_num,
-                                      no_ref=False
-                                      )
-        # if not self.training:
-        if self.collision_check:
-            collide = batch_sample_check_collision(self.sample_plan['X'],self.context['predictions'], self.context['current_state'][..., 5:]).bool()
-            collide = collide.unsqueeze(-1).unsqueeze(-1)*torch.inf
-            collide = torch.nan_to_num(collide, nan=0)
-        else:
-            collide = torch.zeros([1],device=self.sample_plan['X'].device)
-        # else:
-        # collide = torch.zeros_like(self.sample_plan['X'][...,0:1],device=self.device)
-        self.meter = risk_cost_function_sample(
-                                            self.sample_plan, 
-                                            self.context['current_state'], 
-                                            self.context['predictions'], 
-                                            self.context['ref_line_info'], 
-                                            self.context['vf_map']
-                                                )
-        self.risks = self.meter2risk(self.meter)
-        self.plan_result = self.selector(self.risks+collide, self.sample_plan)
+        self.plan_result, self.sample_plan = sampling_plan(self.context, 
+                             self.meter2risk,
+                             risk_cost_function_sample,
+                             genetic=genetic,
+                             plan_sample_num=self.plan_sample_num,
+                             cov_base=self.cov_base,
+                             turb_num=self.turb_num,
+                             use_lattice=True,
+                             collision_check=self.collision_check,
+                            )
         return self.plan_result
-
-    def selector(self, risks, sample_plan, k=1):
-        costs = risks*self.hand_prefer[:risks.shape[-1]].to(risks.device)
-        i = torch.topk(costs.mean(dim=[-1,-2]),k=k,dim=1,largest=False).indices
-        sampleX = sample_plan['X']
-        sampleu = sample_plan['u']
-        _,_,t,d = sampleX.shape
-        _,_,_,du = sampleu.shape
-        X = torch.gather(sampleX,1,i.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,d))
-        u = torch.gather(sampleu,1,i.unsqueeze(-1).unsqueeze(-1).repeat(1,1,t,du))
-        return X.squeeze(1),u.squeeze(1) #torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
 
     def get_loss(self, gt, tb_iter=0, tb_writer=None):
         """
         must be called after forward
         """
-        # u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        # self.gt_sample = get_sample(self.context,u.squeeze(1), 
-        #                                  cov=self.cov_base*(self.cov_inc**tb_iter), 
-        #                                  sample_num=self.gt_sample_num,
-        #                                  turb_num = self.turb_num)
         self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
         raw_meter = risk_cost_function_sample(
                                             self.gt_sample, 
@@ -389,40 +403,26 @@ class CostMapPlanner(Planner):
         except:
             logging.warning('cov_base amd conv_inc not define')
 
-    def plan(self, context):
+    def plan(self, context, genetic:int = 0):
         self.context = context
-        self.sample_plan = get_sample(context,
-                                      cov=self.cov_base, 
-                                      sample_num=self.plan_sample_num, 
-                                      turb_num=self.turb_num, 
-                                      )
-        self.risks = self.context['cost_map'].get_cost_by_pos(self.sample_plan['X'])
-        self.plan_result = self.selector(self.risks, self.sample_plan)
+        self.plan_result, self.sample_plan = sampling_plan(self.context, 
+                             self.meter2risk,
+                             self.context['cost_map'].get_cost_by_pos,
+                             genetic=genetic,
+                             plan_sample_num=self.plan_sample_num,
+                             cov_base=self.cov_base,
+                             turb_num=self.turb_num,
+                             use_lattice=True,
+                             collision_check=self.collision_check,
+                            )
         return self.plan_result
-
-    def selector(self, risks, sample_plan):
-        costs = risks*self.hand_prefer[:risks.shape[-1]].to(risks.device)
-        i = torch.argmin(costs.mean(dim=[-1,-2]),dim=1)
-        X,u = [],[]
-        sampleX = sample_plan['X']
-        sampleu = sample_plan['u']
-        for ii,m in enumerate(i.cpu()):
-            X.append(sampleX[ii,m])
-            u.append(sampleu[ii,m])
-        X = torch.stack(X,dim=0)
-        u = torch.stack(u,dim=0)
-        return X,u#torch.gather(sample_plan['X'],1,i),torch.gather(sample_plan['u'],1,i[...,:2])
 
     def get_loss(self, gt, tb_iter=0, tb_writer=None):
         """
         must be called after forward
         """
         loss = 0
-        u = get_u_from_X(gt,self.context['current_state'][:,0:1])
-        self.gt_sample = get_sample(self.context,u.squeeze(1), 
-                                         cov=self.cov_base*(self.cov_inc**tb_iter), 
-                                         sample_num=self.gt_sample_num,
-                                         turb_num=self.turb_num)
+        self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
         sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
         if self.cfg['loss']['nmp_loss']:
             cost = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
