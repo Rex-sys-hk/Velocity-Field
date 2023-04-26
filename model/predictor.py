@@ -44,7 +44,7 @@ class Predictor(PreABC):
 
     
 class RiskMapPre(PreABC):
-    def __init__(self, name:str = 'risk', future_steps = 50, mode_num = 3, gamma = 1.):
+    def __init__(self, name:str = 'risk', future_steps = 50, mode_num = 3, gamma = 1., **kwargs):
         super().__init__(name, future_steps, mode_num, gamma)
 
         self.name = 'risk'

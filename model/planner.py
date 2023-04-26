@@ -32,11 +32,13 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
     init_guess_u[...,1] = pi_2_pi(init_guess_u[...,1])
     if init_guess_u.shape[1]>1:
         # implement same noise to topk initguess
-        u = (torch.randn([btsz,init_guess_u.shape[1],sample_num,turb_num,2])*cov) \
+        u = (torch.randn([btsz,init_guess_u.shape[1],sample_num,turb_num,2],
+                         device=init_guess_u.device)*cov) \
             +init_guess_u.unsqueeze(2).repeat(1,1,sample_num,1,1)
         u = u.reshape(btsz,-1,50,2)
     else:
-        u = (torch.randn([btsz,sample_num,turb_num,2])*cov)+init_guess_u
+        u = (torch.randn([btsz,sample_num,turb_num,2], 
+                         device=init_guess_u.device)*cov)+init_guess_u
     if add_noref and add_noref<u.shape[-3]:
         u = torch.cat([u,cov*torch.randn_like(u[:,0:add_noref,:,:])],dim=-3)
     u = u.clamp(min=-lim, max=lim)

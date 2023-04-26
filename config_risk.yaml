@@ -21,7 +21,7 @@ planner:
   inference_genetic: 10
 
   meter2risk: 
-    name: 'CostModelTV'
+    name: 'CostModel'
     V_dim: 6
     th: 50
     # input_shape: 256
