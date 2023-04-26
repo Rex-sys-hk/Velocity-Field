@@ -231,7 +231,7 @@ class MotionPlanner(Planner):
 
         # set up motion planner
         self.layer = th.TheseusLayer(self.optimizer, vectorize=False)
-        self.layer.to(device=device)
+        # self.layer.to(device=device)
 
 class EularSamplingPlanner(Planner):
     def __init__(self, meter2risk: Meter2Risk, device='cuda:0', test=False):

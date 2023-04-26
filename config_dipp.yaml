@@ -21,3 +21,7 @@ planner:
   sdf_interpolating_factor: 1
   u_dim: 2
   default_v: 20 # m/s
+  gt_sample_num: 30
+  plan_sample_num: 200 # no less than 200
+  lattice_sampler: False
+  collision_check: False

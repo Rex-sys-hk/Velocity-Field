@@ -118,6 +118,7 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             planner_inputs[f'cost_function_weight_{i+1}'] = cost_function_weights[:, i].unsqueeze(1)
 
         with torch.no_grad():
+            planner.layer.to(init_guess.device)
             final_values, info = planner.layer.forward(planner_inputs)
 
             plan = final_values["control_variables"].view(-1, 50, 2)
