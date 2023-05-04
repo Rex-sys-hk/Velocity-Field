@@ -26,3 +26,5 @@ planner:
     nmp_loss: True
   
   risk_preference: [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]
+
+data_aug: True

@@ -28,7 +28,12 @@ class Meter2Risk(nn.Module):
 
     def set_latent_feature(self, latent_feature):
         self.latent_feature = latent_feature
-
+        
+    def disable_grad(self):
+        raise NotImplementedError(Meter2Risk)
+    
+    def enable_grad(self):
+        raise NotImplementedError(Meter2Risk)
 
 
 def get_pos_def_matrix(mat:torch.Tensor):
@@ -888,6 +893,14 @@ class CostModelTV(Meter2Risk):
         #     plt.close()
         return risk
     
+    def disable_grad(self):        
+        self.coeff.requires_grad = False
+        self.t_coeff.requires_grad = False
+    
+    def enable_grad(self):
+        self.coeff.requires_grad = True
+        self.t_coeff.requires_grad = True
+    
 class CostModel(Meter2Risk):
     def __init__(self, device: str = 'cpu') -> None:
         super().__init__(device)
@@ -898,6 +911,12 @@ class CostModel(Meter2Risk):
         risk = torch.softmax(self.coeff,dim=-1)*raw_meters_vec**2
         return risk
     
+    def disable_grad(self):        
+        self.coeff.requires_grad = False
+    
+    def enable_grad(self):
+        self.coeff.requires_grad = True
+        
 class Coefficient(Meter2Risk):
     def __init__(self, device: str = 'cuda') -> None:
         super().__init__(device)

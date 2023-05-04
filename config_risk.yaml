@@ -10,7 +10,7 @@ planner:
   name: 'risk'
   time_horizon: 50 # same as future_steps
 
-  cov_base: [0.2, 0.2]
+  cov_base: [0.34, 0.34]
   cov_inc: [0., 0.] #1.e-4
   const_turb: True
   gt_sample_num: 30
@@ -18,7 +18,7 @@ planner:
   lattice_sampler: True
   collision_check: False
   train_genetic: 3
-  inference_genetic: 10
+  inference_genetic: 3
 
   meter2risk: 
     name: 'CostModel'
@@ -34,3 +34,5 @@ planner:
     nmp_loss: False
   
   risk_preference: [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]
+
+data_aug: True

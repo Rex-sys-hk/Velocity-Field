@@ -327,7 +327,7 @@ def model_training():
     batch_size = args.batch_size
     
     # set up data loaders
-    train_set = DrivingData(args.train_set+'/*',data_aug=True) # TODO
+    train_set = DrivingData(args.train_set+'/*',data_aug=cfg['data_aug'])
     valid_set = DrivingData(args.valid_set+'/*')
     if distributed:
         predictor = DDP(
@@ -418,6 +418,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--img_log_interval", type=int, default=100)
     parser.add_argument('--imm_show', action="store_true", help='if show image immediately', default=False)
+    parser.add_argument('--opt_plan', action="store_true", help='enable optimization based planning', default=False)
 
     args = parser.parse_args()
     distributed = False

@@ -155,6 +155,8 @@ if __name__ == "__main__":
     parser.add_argument('--device', type=str, help='run on which device (default: cuda)', default='cuda')
     parser.add_argument('--smoothing', type=str, help='enable after smoothingm include(default: none), single, mt, mp', default='none')
     parser.add_argument('--gt_replay', action="store_true", help='if replay ground truth (default: False)', default=False)
+    parser.add_argument('--opt_plan', action="store_true", help='enable optimization based planning', default=False)
+    
     args = parser.parse_args()
     cfg_file = args.config if args.config else 'config.yaml'
     os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)

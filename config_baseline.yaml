@@ -7,3 +7,5 @@ model_cfg:
 
 planner: 
   name: 'base'
+
+data_aug: True

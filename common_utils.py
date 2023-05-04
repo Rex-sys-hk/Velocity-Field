@@ -132,8 +132,11 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             'init_guess_u': u,
             'lattice_sample': lattice_sample,
         }
-        plan,u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic'])
-    
+        if args.opt_plan:
+            plan, u = planner.opt_plan(planner_inputs) # control
+        else:
+            with torch.no_grad():
+                plan,u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic'])
     elif planner.name=='risk':
         # u, prediction = select_future(us, predictions, scores)
         planner:RiskMapPlanner=planner
@@ -146,9 +149,11 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             'init_guess_u': u,
             'lattice_sample': lattice_sample,
         }
-        with torch.no_grad():
-            plan, u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic']) # control
-        # plan = bicycle_model(u, ego[:, -1])[:, :, :3]
+        if args.opt_plan:
+            plan, u = planner.opt_plan(planner_inputs) # control
+        else:
+            with torch.no_grad():
+                plan,u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic'])
     elif planner.name=='nmp':
         planner:CostMapPlanner = planner
         cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
@@ -163,12 +168,15 @@ def inference(batch, predictor, planner, args, use_planning, distributed=False, 
             'lattice_sample': lattice_sample,
         }
         # plan loss
-        with torch.no_grad():
-            plan, _ = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic']) # control
-    ## smoothing
+        if args.opt_plan:
+            plan, u = planner.opt_plan(planner_inputs) # control
+        else:
+            with torch.no_grad():
+                plan,u = planner.plan(planner_inputs, genetic=planner.cfg['inference_genetic'])
     if parallel=='none':
         return plan, prediction
-    plan = plan.cpu().numpy()
+    ## smoothing
+    plan = plan.cpu().detach().numpy()
     c_state = current_state.cpu().numpy()
     threads = []
     if parallel=='mp' and plan.shape[0]>1:

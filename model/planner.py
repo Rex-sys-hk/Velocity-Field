@@ -4,7 +4,7 @@ import sys
 import os
 from turtle import TurtleScreenBase
 from attr import has
-from matplotlib.pyplot import flag
+import matplotlib.pyplot as plt
 from numpy import cross
 import torch
 import numpy as np
@@ -68,23 +68,25 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
         u[:,1:] = l_u + u[:,1:]
     return {'X':X,'u':u}
 
-def sample_loss(CE, sample, gt, costs, cfg, tk=0, interval=10):
+def sample_loss(CE, sample, gt, costs, cfg, tk=0, interval=1):
     loss = 0
-    traj_risk = costs[:,::interval]
+    traj_costs = costs[:,::interval]
     if not(cfg['loss']['dis_prob'] or cfg['loss']['gt_label']):
         return loss
     diffXd = torch.norm(
         sample['X'][:,::interval,..., :3] - gt[..., :3], dim=-1)
-    diffXd = torch.log(torch.nn.functional.normalize(diffXd,dim=1)+1)
+    # gaussian distribution
+    sigma = 1.
+    diffXd = 1/(sigma*(2*torch.pi)**0.5)*torch.exp(-diffXd.mean(dim=-1)**2/(2*sigma**2))
     
+    traj_costs = torch.mean(traj_costs,dim=[-1])
     if tk:
-        diffXd, Xd_id_best = torch.topk(diffXd.mean(dim=-1), k=tk, dim=1, largest=False, sorted=False)
-        traj_risk = torch.mean(traj_risk,dim=[-1])
-        traj_risk = torch.gather(traj_risk,1,Xd_id_best)
-    traj_risk = torch.log(torch.nn.functional.normalize(traj_risk,dim=1)+1)
+        diffXd, Xd_id_best = torch.topk(diffXd, k=tk, dim=1, largest=False, sorted=False)
+        traj_costs = torch.gather(traj_costs,1,Xd_id_best)
+    traj_costs = 1-torch.nn.functional.normalize(traj_costs,dim=1,p=torch.inf)
     
-    prob = torch.softmax(-traj_risk, dim=1)
-    dis_prob = torch.softmax(-diffXd, dim=1)
+    prob = torch.softmax(traj_costs, dim=1)
+    dis_prob = diffXd
     if cfg['loss']['dis_prob']:
         # smoothed distance loss
         loss += CE(prob, dis_prob)
@@ -94,6 +96,94 @@ def sample_loss(CE, sample, gt, costs, cfg, tk=0, interval=10):
         label = torch.zeros_like(prob[:,0]).long()
         loss += CE(prob, label)
     return loss
+
+class OptPlan(torch.nn.Module):
+    def __init__(self, th = 50, ti = 0.1, init_guess=torch.zeros(50,2), init_state=torch.zeros(1,3), measure=None, meter2risk=None, context=None, max_iter=100, max_tol=1e-3):
+        super().__init__()
+        self.th = th
+        self.ti = ti
+        self.lim = torch.tensor([MAX_ACC,MAX_STEER],device = init_guess.device)
+        self.init_state = init_state[:,0:1] # ego vehicle only
+        self.init_guess = bicycle_model(init_guess.unsqueeze(-3),self.init_state)
+        init_norm_u = init_guess.unsqueeze(-3)/(self.lim*2)+0.5
+        init_norm_u = torch.log(init_norm_u/(1-init_norm_u))
+        self.u = torch.nn.Parameter(init_norm_u)
+        self.u.requires_grad = True
+        self.optimizer = torch.optim.AdamW([self.u], lr=0.2)
+        
+        self.max_iter = 100
+        self.max_tol = 1e-3
+        
+        self.measure = measure
+
+        self.meter2risk = meter2risk
+        if self.meter2risk:
+            self.meter2risk.eval().disable_grad()
+        self.context = context
+        self.map = self.context['vf_map'] if 'vf_map' in self.context else None
+        if self.map:
+            self.map.eval().disable_grad()
+    
+    def warp_u(self,u):
+        return (torch.sigmoid(u)-0.5)*self.lim*2
+    
+    def forward(self):
+        self.X = bicycle_model(self.warp_u(self.u),self.init_state)
+        return self.X
+    
+    def loss(self):
+        meter = self.measure(
+                        {'X':self.X,'u':self.warp_u(self.u)}, 
+                        self.context['current_state'], 
+                        self.context['predictions'].detach(), 
+                        self.context['ref_line_info'], 
+                        self.map,
+                        )
+        costs = self.meter2risk(meter) if self.meter2risk is not None else meter
+        # x = torch.arange(costs.shape[-2])[:]
+        # plt.clf()
+        # plt.plot(x,costs[...,-1].cpu().detach().squeeze().numpy(),label='dy')
+        # plt.plot(x,costs[...,-2].cpu().detach().squeeze().numpy(),label='dx')
+        # plt.plot(x,costs[...,-3].cpu().detach().squeeze().numpy(),'--', label='dtheta')
+        # plt.plot(x,costs[...,-4].cpu().detach().squeeze().numpy(),'--', label='theta')
+        # plt.plot(x,costs[...,-5].cpu().detach().squeeze().numpy(),'--', label='jerk')
+        # plt.plot(x,costs[...,-6].cpu().detach().squeeze().numpy(),'--', label='acc')
+        # plt.scatter(self.X[...,0].cpu().detach(), self.X[...,1].cpu().detach(), label='traj', alpha=0.5)
+        # plt.scatter(self.context['ref_line_info'][...,0].cpu().detach(), self.context['ref_line_info'][...,1].cpu().detach(), label='refline', alpha=0.5)
+        # plt.scatter(self.init_guess[...,0].cpu().detach(), self.init_guess[...,1].cpu().detach(), label='init_guess', alpha=0.5)
+        # plt.legend()
+        # plt.axis('equal')
+        # plt.savefig('opt.png')
+        costs = costs.mean()
+        return costs
+
+    def opti(self):
+        l_loss = 1e5
+        for i in range(self.max_iter):
+            self.optimizer.zero_grad()
+            self.forward()
+            loss = self.loss()
+            loss.backward()
+            self.optimizer.step()
+            if torch.abs(l_loss-loss) < self.max_tol:
+                break
+            l_loss = loss
+        return self.warp_u(self.u)
+
+def optimize_plan(context, init_guess, measure, meter2risk):
+    ## how to make sure gradient is enbaled
+    opt_plan = OptPlan(init_guess=init_guess, 
+                       init_state=context['current_state'], 
+                       measure=measure, 
+                       meter2risk=meter2risk, 
+                       context=context)
+    u = opt_plan.opti()
+    X = opt_plan.X
+    if opt_plan.meter2risk:
+        opt_plan.meter2risk.train().enable_grad()
+    if opt_plan.map:
+        opt_plan.map.train().enable_grad()
+    return X.squeeze(-3), u.squeeze(-3)
 
 def selector(raw_costs, sample_plan, k=1, hand_prefer=torch.ones([15])):
     costs = raw_costs*hand_prefer[:raw_costs.shape[-1]].to(raw_costs.device)
@@ -124,7 +214,7 @@ def sampling_plan(context, meter2risk, measure,
         for i in range(genetic):
             sample_plan = get_sample(new_context, 
                                         sample_num=plan_sample_num if i==0 else 30, 
-                                        cov=cov_base,
+                                        cov=cov_base*2**(-i),
                                         turb_num=turb_num if i==0 else 50,
                                         no_ref=no_ref,
                                         use_lattice=use_lattice if i==0 else False,
@@ -135,7 +225,7 @@ def sampling_plan(context, meter2risk, measure,
                             context['current_state'], 
                             context['predictions'], 
                             context['ref_line_info'], 
-                            context['vf_map']
+                            context['vf_map'] if 'vf_map' in context else None,
                             )
             costs = meter2risk(meter) if meter2risk is not None else meter
             # if not self.training:
@@ -170,7 +260,7 @@ def sampling_plan(context, meter2risk, measure,
                 context['current_state'], 
                 context['predictions'], 
                 context['ref_line_info'], 
-                context['vf_map']
+                context['vf_map'] if 'vf_map' in context else None
                 )
     costs = meter2risk(meter) if meter2risk is not None else meter
     plan_result = selector(costs+collide, sample_plan)
@@ -183,7 +273,12 @@ class Planner:
         self.cfg = load_cfg_here()['planner']
         self.test = test
 
-
+    def opt_plan(self, context):
+        if not self.measure:
+            raise NotImplementedError('measure function not implemented')
+        if not self.meter2risk:
+            raise NotImplementedError('meter2risk function not implemented')
+        return optimize_plan(context, context['init_guess_u'], self.measure, self.meter2risk)
 
 class BasePlanner(Planner):
     def __init__(self,device, test=False) -> None:
@@ -239,25 +334,27 @@ class EularSamplingPlanner(Planner):
         self.name = 'esp'
         self.device = device
         self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
-        self.cost_function_weights = meter2risk
+        self.meter2risk = meter2risk
         self.cov_base = torch.tensor([0.2, 0.1])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
         self.turb_num = 50
         
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
+        self.collision_check = self.cfg['collision_check']
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
             self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
-            logging.warning('cov_base amd conv_inc not define')
+            logging.warning('cov_base amd conv_inc not define')            
+        self.measure = cost_function_sample
     
     def plan(self, context, genetic=0):
         self.context = context
         self.plan_result, self.sample_plan = sampling_plan(self.context, 
-                             self.cost_function_weights,
-                             cost_function_sample,
+                             self.meter2risk,
+                             self.measure,
                              genetic=genetic,
                              plan_sample_num=self.plan_sample_num,
                              cov_base=self.cov_base,
@@ -272,12 +369,12 @@ class EularSamplingPlanner(Planner):
         must be called after forward
         """
         self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
-        cost = cost_function_sample(self.gt_sample['u'], 
+        cost = self.measure(self.gt_sample, 
                                     self.context['current_state'], 
                                     self.context['predictions'], 
                                     self.context['ref_line_info'], 
                                     )
-        cost = self.cost_function_weights(cost)
+        cost = self.meter2risk(cost)
         
         loss = 0
         if self.cfg['loss']['nmp_loss']:
@@ -327,12 +424,13 @@ class RiskMapPlanner(Planner):
             self.turb_num = 1 if self.cfg['const_turb'] else 50 
         except:
             logging.warning('cov_base amd conv_inc not define')
+        self.measure = risk_cost_function_sample
 
     def plan(self, context, genetic:int = 0):
         self.context = context
         self.plan_result, self.sample_plan = sampling_plan(self.context, 
                              self.meter2risk,
-                             risk_cost_function_sample,
+                             self.measure,
                              genetic=genetic,
                              plan_sample_num=self.plan_sample_num,
                              cov_base=self.cov_base,
@@ -347,7 +445,7 @@ class RiskMapPlanner(Planner):
         must be called after forward
         """
         self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
-        raw_meter = risk_cost_function_sample(
+        raw_meter = self.measure(
                                             self.gt_sample, 
                                             self.context['current_state'], 
                                             self.context['predictions'], 
@@ -397,7 +495,7 @@ class CostMapPlanner(Planner):
         
         self.gt_sample_num = self.cfg['gt_sample_num']
         self.plan_sample_num = self.cfg['plan_sample_num']
-
+        self.collision_check = self.cfg['collision_check']
         try:
             self.cov_base = torch.tensor(self.cfg['cov_base'])
             self.cov_inc = torch.tensor(self.cfg['cov_inc']) + 1.
@@ -425,9 +523,9 @@ class CostMapPlanner(Planner):
         """
         loss = 0
         self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
-        sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
+        sample_costs = self.context['cost_map'].get_cost_by_pos(self.gt_sample)
         if self.cfg['loss']['nmp_loss']:
-            cost = self.context['cost_map'].get_cost_by_pos(self.gt_sample['X'])
+            cost = self.context['cost_map'].get_cost_by_pos(self.gt_sample)
             gt_x = self.gt_sample['X'][:,0:1]
             sample_x = self.gt_sample['X'][:,1:]
             gt_cost = cost[:,0:1]
@@ -776,8 +874,8 @@ class TmpContainer():
     def __init__(self, tensor=None) -> None:
         self.tensor = tensor
 
-def cost_function_sample(control_variables, current_state, predictions, ref_line):
-    control_variables = TmpContainer(control_variables)
+def cost_function_sample(control_variables, current_state, predictions, ref_line, *arg):
+    control_variables = TmpContainer(control_variables['u'])
     current_state = TmpContainer(current_state)
     predictions = TmpContainer(predictions)
     ref_line = TmpContainer(ref_line)

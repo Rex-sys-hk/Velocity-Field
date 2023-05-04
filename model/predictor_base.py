@@ -240,7 +240,7 @@ class AVDecoderNc(nn.Module):
         feature = torch.cat([agent_map, agent_agent.unsqueeze(1).repeat(1, self.mode_num, 1)], dim=-1)
         actions = self.control(feature).view(-1, self.mode_num , self._future_steps, 2)
         self.mean_control = self.mean_control.to(actions.device)
-        actions = torch.sigmoid(actions)*2*self.mean_control - self.mean_control
+        actions = (torch.sigmoid(actions)-0.5)*2*self.mean_control
         return actions, 0
 
 class Score(nn.Module):
@@ -369,6 +369,20 @@ class VFMapDecoder(nn.Module):
                                    )
         dx_dy = self.transformer(x)
         return dx_dy
+    
+    def disable_grad(self):
+        self.reduce.requires_grad_(False)
+        self.map_feat_emb.requires_grad_(False)
+        self.emb.requires_grad_(False)
+        self.cross_attention.requires_grad_(False)
+        self.transformer.requires_grad_(False)
+        
+    def enable_grad(self):
+        self.reduce.requires_grad_(True)
+        self.map_feat_emb.requires_grad_(True)
+        self.emb.requires_grad_(True)
+        self.cross_attention.requires_grad_(True)
+        self.transformer.requires_grad_(True)
 
 class VectorField(nn.Module):
     def __init__(self) -> None:
@@ -479,8 +493,14 @@ class VectorField(nn.Module):
         discount = torch.exp(-0.5*torch.norm(nearest_dis, dim=-1, keepdim=True)**2)
         correction = nearest_dis[...,:2]/0.1 # dt
         correction_discount = torch.exp(-0.5*torch.norm(nearest_dis[...,:2], dim=-1, keepdim=True)**2)
-        loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, 
-                                                   correction_discount*correction+discount*nearest_sample[...,3:5])
+        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, 
+        #                                             correction+discount*nearest_sample[...,3:5])
+        loss += (correction_discount \
+                *torch.norm(
+                dx_dy_nearest-(correction+discount*nearest_sample[...,3:5]), 
+                dim=-1, 
+                keepdim=True)
+            ).mean()
         return loss
     
     def vector_field_diff(self, traj):
@@ -495,10 +515,16 @@ class VectorField(nn.Module):
         diff = torch.abs(diff)
         # diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
         return diff
+    
+    def disable_grad(self):
+        self.vf_inquery.disable_grad()
+    
+    def enable_grad(self):
+        self.vf_inquery.enable_grad()
 # %% cost volume
 class CostMapDecoder(nn.Module):
     def __init__(self) -> None:
-
+        super().__init__()
         cfg = load_cfg_here()
         self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
         # self.map_feat_emb = nn.Sequential(nn.Linear(256*9, 256), nn.ReLU(), nn.Dropout(0.1), nn.Linear(256, 256),nn.ReLU(),nn.Dropout(0.1),nn.Linear(256, 64))
@@ -640,24 +666,17 @@ class STCostMap(nn.Module):
         idx = idx_s+idx_l*self.steps_s+idx_t*self.steps_l*self.steps_s
         return idx.to(dtype=long).clip(0,self.steps_s*self.steps_l-1)
     
-    def get_cost_by_pos(self,samples):
+    def get_cost_by_pos(self,samples, *args):
+        samples = samples['X']
         btsz, sample, th, dim = samples.shape
-        t = torch.linspace(self.real_t/th, self.real_t, th).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
-        emb_t = (t/self.th)*2*torch.pi
-        # grid map utils
-        # idx = self.metric2index(samples[...,0].view(btsz,-1), samples[...,1].view(btsz, -1), t)
-        # cost = torch.stack([self.cost_map[i,m] for i,m in enumerate(idx)],dim=0)
-        # inquiry utils
-        samples = samples.view(btsz,-1,dim)
-        query = [samples[...,0], samples[...,1], emb_t, torch.sin(emb_t), torch.sin(emb_t)]
-        query = torch.stack(query, dim=-1)
-        cost = self.cost(query)
-        return cost.view(btsz, sample, th, 1)
+        query = time_embeding(samples[...,:2])
+        cost = self.cost(query.reshape(btsz, -1, query.shape[-1]))
+        return cost.reshape(btsz, sample, th, 1)
     
     def plot(self, samples = None, interval = 1):
         L, S, T, d = self.grid_points.shape
         with torch.no_grad():
-            cost = self.cost(self.grid_points.to(samples.device).view(1,-1,6).repeat(samples.shape[0],1,1))[0]
+            cost = self.cost(self.grid_points.to(samples.device).view(1,-1,5).repeat(samples.shape[0],1,1))[0]
         # fig = plt.figure()
         # ax = fig.add_subplot(projection='3d')
         # ax.scatter(self.grid_points[0,::interval,0].cpu().detach(), 
@@ -748,7 +767,8 @@ class TConvCostMap(STCostMap):
         idx_t = torch.round((t-self.resolution_t)/self.resolution_t)
         return torch.stack([idx_t,idx_s,idx_l],dim=-1).to(dtype=long)
 
-    def get_cost_by_pos(self,samples):
+    def get_cost_by_pos(self,samples, *args):
+        samples = samples['X']
         btsz, sample, th, dim = samples.shape
         # t = self.t.unsqueeze(-1).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)
         t = torch.linspace(self.real_t/th, self.real_t, th).repeat(btsz,sample,1,1).reshape(btsz,-1).to(samples.device)

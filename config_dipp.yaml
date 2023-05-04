@@ -21,3 +21,5 @@ planner:
   sdf_interpolating_factor: 1
   u_dim: 2
   default_v: 20 # m/s
+
+data_aug: False

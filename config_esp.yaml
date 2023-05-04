@@ -30,3 +30,5 @@ planner:
     dis_prob: True
     gt_label: False #not recomended
     nmp_loss: False
+
+data_aug: True
