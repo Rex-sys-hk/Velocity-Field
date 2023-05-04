@@ -81,14 +81,14 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
 
             for i in range(identical_output.shape[1]):
                 planner_inputs[f'cost_function_weight_{i+1}'] = identical_output[:, i].unsqueeze(1)
-
+            planner.layer.to(init_guess.device)
             final_values, info = planner.layer.forward(planner_inputs)
             u = final_values["control_variables"].view(-1, 50, 2)
             plan = bicycle_model(u, ego[:, -1])[:, :, :3]
 
             plan_cost = planner.objective.error_squared_norm().mean() / planner.objective.dim()
-            plan_loss += imitation_loss(plan, ground_truth)
-            loss += plan_loss + 1e-3 * plan_cost # planning loss
+            loss += imitation_loss(plan, ground_truth)
+            loss += 1e-3 * plan_cost # planning loss
         ## EULA
         elif planner.name=='esp':
             planner:EularSamplingPlanner=planner
