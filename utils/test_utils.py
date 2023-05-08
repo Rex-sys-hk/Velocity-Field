@@ -1,6 +1,7 @@
 import logging
 from multiprocessing.resource_sharer import stop
 from tkinter.tix import S_REGION
+from turtle import distance
 import torch
 import matplotlib.pyplot as plt
 import scipy.spatial as T
@@ -286,7 +287,7 @@ def batch_sample_check_collision(ego_center_points, neighbor_center_points, size
     if t_stamp:
         collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).bool()
         return collision
-    collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).amax(dim=-1)
+    collision = torch.where(dis.amin(dim=-2)<=0, 1., 0.).amax(dim=-1).bool()
     return collision 
 
 def check_collision_step(ego_center_points, neighbor_center_points, sizes):
@@ -364,21 +365,24 @@ def batch_check_traffic(traj, ref_line):
     red_light = torch.where(s_ego>stop_point,1,0)
     return red_light, off_route
 
-def batch_sample_check_traffic(traj, ref_line):
+def batch_sample_check_traffic(traj, ref_line, t_stamp=False):
     # project to frenet
     distance_to_ref = traj[..., :2].unsqueeze(-2)-ref_line[..., :2].unsqueeze(1).unsqueeze(1)
     distance_to_ref = torch.norm(distance_to_ref, dim=-1)
     distance_to_route = torch.amin(distance_to_ref, dim=[-1])
-    off_route = torch.where(distance_to_route > 5, 1, 0).amax(dim=[-1])
-
+    off_route = torch.where(distance_to_route > 5, 1, 0)
     # get stop point 
-    s_ego = torch.argmin(distance_to_ref, dim=-1).amax(dim=[-1])
+    s_ego = torch.argmin(distance_to_ref, dim=-1)
     bt_id, stop_point_id = torch.where(ref_line[:, :, -1]==0)
-    stop_point = torch.ones_like(s_ego, device=s_ego.device)*torch.inf
+    stop_point = torch.ones_like(s_ego.amax(dim=[-1]), device=s_ego.device)*torch.inf
     for i, idx in enumerate(bt_id):
         stop_point[idx] = torch.min(stop_point[idx],stop_point_id[i])
 
-    red_light = torch.where(s_ego>stop_point,1,0)
+    red_light = torch.where(s_ego>stop_point.unsqueeze(-1),1,0)
+    
+    if not t_stamp:
+        off_route = off_route.amax(dim=[-1])
+        red_light = red_light.amax(dim=[-1])
     return red_light, off_route
 
 def check_similarity(traj, gt):
