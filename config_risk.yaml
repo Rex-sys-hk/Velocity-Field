@@ -18,11 +18,11 @@ planner:
   lattice_sampler: True
   collision_check: False
   train_genetic: 3
-  inference_genetic: 3
+  inference_genetic: 8
 
   meter2risk: 
     name: 'CostModel'
-    V_dim: 6
+    V_dim: 5
     th: 50
     # input_shape: 256
     # idv: True

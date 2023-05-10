@@ -73,8 +73,8 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                     batch.append(torch.from_numpy(obs[i]))
                 if not args.gt_replay:
                     plan_traj,prediction = inference(batch, predictor, planner, args, args.use_planning, parallel=args.smoothing)
-                    plan_traj = plan_traj.cpu().numpy()[0]
-                    prediction = prediction.cpu().numpy()[0]
+                    plan_traj = plan_traj.cpu().detach().numpy()[0]
+                    prediction = prediction.cpu().detach().numpy()[0]
                 else:
                     g_traj = simulator.sdc_route[simulator.timestep+1:simulator.timestep+51]
                     current_pose = simulator.sdc_route[simulator.timestep]

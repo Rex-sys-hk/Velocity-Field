@@ -15,13 +15,13 @@ import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 import logging
 
-WB = 3.0  # rear to front wheel
+WB = 3.089  # rear to front wheel
 W = 2.0  # width of car
 R = W/2.0
 LF = 3.3  # distance from rear to vehicle front end
 LB = 1.0  # distance from rear to vehicle back end
-MAX_STEER = 0.6  # [rad] maximum steering angle
-MAX_ACC = 4.  # [m/s^2] maximum acceleration 
+MAX_STEER = 0.5  # [rad] maximum steering angle
+MAX_ACC = 5.  # [m/s^2] maximum acceleration 
 BUBBLE_DIST = (LF - LB) / 2.0  # distance from rear to center of vehicle.
 BUBBLE_R = np.hypot((LF + LB) / 2.0, W / 2.0)  # bubble radius
 
@@ -211,10 +211,9 @@ def bicycle_model(control, current_state):
     v = torch.clamp(v, min=0)
 
     # angle
-    d_theta = v * torch.tan(delta) / L # use delta to approximate tan(delta)
+    d_theta = v * delta / L # use delta to approximate tan(delta)
     theta = theta_0.unsqueeze(-1) + torch.cumsum(d_theta * dt, dim=-1)
-    # theta = torch.fmod(theta, 2*torch.pi)
-    theta = pi_2_pi(theta)
+    theta = torch.fmod(theta, 2*torch.pi)
     
     # x and y coordniate
     x = x_0.unsqueeze(-1) + torch.cumsum(v * torch.cos(theta) * dt, dim=-1)

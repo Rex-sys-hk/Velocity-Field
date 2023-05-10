@@ -65,7 +65,7 @@ class RiskMapPre(PreABC):
         cost_function_weights) = self.forward_base(ego, neighbors, map_lanes, map_crosswalks)
         # to be compatible with risk map
         latent_feature = {'map_feature':map_feature,'agent_map':agent_map,'agent_agent':agent_agent}
-        self.meter2risk.set_latent_feature(latent_feature)
+        self.meter2risk.set_latent_feature(self.score.get_feature())
         self.vf_map.vf_inquery.set_latent_feature(latent_feature)
         
         return plans, predictions, scores, cost_function_weights

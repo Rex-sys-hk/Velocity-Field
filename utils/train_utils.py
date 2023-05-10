@@ -32,7 +32,6 @@ def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
     score_loss = F.cross_entropy(scores, best_mode)
     best_mode_plan = torch.stack([plans[i, m] for i, m in enumerate(best_mode)])
     best_mode_prediction = torch.stack([predictions[i, m] for i, m in enumerate(best_mode)])
-    best_one_hot = torch.nn.functional.one_hot(best_mode,num_classes = scores.shape[-1])
 
     prediction_loss: torch.tensor = 0
     for i in range(10):
@@ -42,12 +41,12 @@ def MFMA_loss(plans, predictions, scores, ground_truth, weights, use_planning):
         imitation_loss = F.smooth_l1_loss(best_mode_plan, ground_truth[:, 0, :, :3])
         imitation_loss += F.smooth_l1_loss(best_mode_plan[:, -1], ground_truth[:, 0, -1, :3])
         
-        return 0.5 * prediction_loss + imitation_loss + score_loss, best_one_hot
+        return 0.5 * prediction_loss + imitation_loss + score_loss, best_mode
     else:
-        return 0.5 * prediction_loss + score_loss, best_one_hot
+        return 0.5 * prediction_loss + score_loss, best_mode
 
-def select_future(plans, predictions, scores):
-    best_mode = torch.argmax(scores,dim=-1)
+def select_future(plans, predictions, scores = None, best_mode = None):
+    best_mode = torch.argmax(scores,dim=-1) if best_mode is None else best_mode
     plan = torch.stack([plans[i, m] for i, m in enumerate(best_mode)])
     prediction = torch.stack([predictions[i, m] for i, m in enumerate(best_mode)])
 
@@ -55,7 +54,7 @@ def select_future(plans, predictions, scores):
 
 def imitation_loss(plans, ground_truth, FDE = 0.2, SDE = 0):
     loss = F.smooth_l1_loss(plans[...,:2], ground_truth[:, 0, :, :2])
-    loss += FDE * F.smooth_l1_loss(plans[..., -1,:2], ground_truth[:, 0, -1, :2])
+    loss += FDE * F.smooth_l1_loss(plans[..., -1,:2], ground_truth[:, 0, -1, :2]) if FDE > 0 else 0
     loss += SDE * F.smooth_l1_loss(plans[..., 0,:2], ground_truth[:, 0, 0, :2]) if SDE > 0 else 0
     return loss
 
@@ -89,7 +88,7 @@ def project_to_frenet_frame(traj, ref_line):
 
     return sl
 
-def project_to_cartesian_frame(traj, ref_line):
+def project_to_cartesian_frame(traj, ref_line, with_yaw = False):
     k = (10 * traj[:, :, 0] + 200).long()
     k = torch.clip(k, 0, 1200-1)
     ref_points = torch.gather(ref_line, 1, k.view(-1, traj.shape[1], 1).expand(-1, -1, 3))
@@ -97,5 +96,10 @@ def project_to_cartesian_frame(traj, ref_line):
     x = x_r - traj[:, :, 1] * torch.sin(theta_r)
     y = y_r + traj[:, :, 1] * torch.cos(theta_r)
     xy = torch.stack([x, y], dim=-1)
+    if with_yaw:
+        yaw = theta_r + traj[:, :, 2]
+        dx = traj[:,:,3]*torch.cos(theta_r) - traj[:,:,4]*torch.sin(theta_r)
+        dy = traj[:,:,3]*torch.sin(theta_r) + traj[:,:,4]*torch.cos(theta_r)
+        xy = torch.stack( [x,y,yaw,dx,dy],dim=-1)
 
     return xy

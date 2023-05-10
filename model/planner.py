@@ -1,11 +1,12 @@
 from copy import deepcopy
+import dis
 import logging
 import sys
 import os
 from turtle import TurtleScreenBase
 from attr import has
 import matplotlib.pyplot as plt
-from numpy import cross
+from numpy import cross, diff
 import torch
 import numpy as np
 from utils.riskmap.car import MAX_ACC, MAX_STEER, bicycle_model, pi_2_pi, pi_2_pi_pos
@@ -68,28 +69,31 @@ def get_sample(context, gt_u = None, cov = torch.tensor([0.2, 0.1]), sample_num=
         u[:,1:] = l_u + u[:,1:]
     return {'X':X,'u':u}
 
-def sample_loss(CE, sample, gt, costs, cfg, tk=0, interval=1):
+def sample_loss(CE, sample, gt, costs, cfg, tk=1, interval=3, cost_topk=30): # TODO interval
     loss = 0
-    traj_costs = costs[:,::interval]
     if not(cfg['loss']['dis_prob'] or cfg['loss']['gt_label']):
         return loss
     diffXd = torch.norm(
-        sample['X'][:,::interval,..., :3] - gt[..., :3], dim=-1)
-    # gaussian distribution
-    sigma = 1.
-    diffXd = 1/(sigma*(2*torch.pi)**0.5)*torch.exp(-diffXd.mean(dim=-1)**2/(2*sigma**2))
-    
-    traj_costs = torch.mean(traj_costs,dim=[-1])
+        sample['X'][:,::interval,..., :2] - gt[..., :2], dim=-1).mean(dim=-1)
+    traj_costs = costs[:,::interval]
+    traj_costs = torch.mean(traj_costs, dim=[-1])
     if tk:
         diffXd, Xd_id_best = torch.topk(diffXd, k=tk, dim=1, largest=False, sorted=False)
         traj_costs = torch.gather(traj_costs,1,Xd_id_best)
-    traj_costs = 1-torch.nn.functional.normalize(traj_costs,dim=1,p=torch.inf)
+    if cost_topk:
+        c_traj_costs, cost_id_best = torch.topk(traj_costs, k=tk, dim=1, largest=False, sorted=False)
+        c_diffXd = torch.gather(diffXd,1,cost_id_best)
+        diffXd = torch.cat([diffXd,c_diffXd],dim=1)
+        traj_costs = torch.cat([traj_costs,c_traj_costs],dim=1)
     
+    diffXd_n = 1-torch.nn.functional.normalize(diffXd,dim=1,p=torch.inf)
+    dis_prob_n = torch.softmax(diffXd_n, dim=1)
+    # dis_prob = diffXd
+    traj_costs = 1-torch.nn.functional.normalize(traj_costs,dim=1,p=torch.inf)
     prob = torch.softmax(traj_costs, dim=1)
-    dis_prob = diffXd
     if cfg['loss']['dis_prob']:
         # smoothed distance loss
-        loss += CE(prob, dis_prob)
+        loss += CE(prob, dis_prob_n)
     if cfg['loss']['gt_label']:
         # label loss
         # can only be enbaled when gt is provided
@@ -111,7 +115,7 @@ class OptPlan(torch.nn.Module):
         self.u.requires_grad = True
         self.optimizer = torch.optim.AdamW([self.u], lr=0.2)
         
-        self.max_iter = 100
+        self.max_iter = 50
         self.max_tol = 1e-3
         
         self.measure = measure
@@ -206,7 +210,7 @@ def sampling_plan(context, meter2risk, measure,
                   add_noref=30, 
                   collision_check=False):
     new_context = {'init_guess_u': context['init_guess_u'].clone().detach(),
-                    'lattice_sample': context['lattice_sample'].clone().detach(),
+                    'lattice_sample': context['lattice_sample'].clone().detach() if context['lattice_sample'] is not None else None,
                     'current_state': context['current_state'].clone().detach(),
                     }
     
@@ -409,7 +413,7 @@ class RiskMapPlanner(Planner):
             torch.tensor(self.cfg['risk_preference']), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
-        self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.05) #if self.loss_CE else None
+        self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
 
         self.cov_base = torch.tensor([0.1, 0.005])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
@@ -444,7 +448,7 @@ class RiskMapPlanner(Planner):
         """
         must be called after forward
         """
-        self.gt_sample = {'X':self.sample_plan['X'][:,::2], 'u':self.sample_plan['u'][:,::2]}
+        self.gt_sample = {'X':self.sample_plan['X'], 'u':self.sample_plan['u']}
         raw_meter = self.measure(
                                             self.gt_sample, 
                                             self.context['current_state'], 
@@ -487,7 +491,7 @@ class CostMapPlanner(Planner):
             torch.tensor(self.cfg['risk_preference']), dim=0
         )  # handcratfed preference
         self.meter2risk = meter2risk
-        self.crossE = torch.nn.CrossEntropyLoss(label_smoothing=0.3) #if self.loss_CE else None
+        self.crossE = torch.nn.CrossEntropyLoss() #if self.loss_CE else None
 
         self.cov_base = torch.tensor([0.1, 0.005])
         self.cov_inc = torch.tensor([1+2e-4, 1+2e-4])
@@ -902,11 +906,11 @@ def risk_cost_function_sample(control_variables, current_state, predictions, ref
         # 'speed':_speed([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         'acceleration':_acceleration([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         'jerk':_jerk([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
-        'steering':_steering([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
+        # 'steering':_steering([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         'steering_change':_steering_change([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         # 'lane_xy':_lane_xy([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         # 'lane_theta':_lane_theta([_control_variables],[_ref_line, _current_state]).unsqueeze(-1),
         # 'safety':_safety([_control_variables],[_predictions, _current_state, _ref_line]).unsqueeze(-1),
-        'vf_map':vf_map.vector_field_diff(control_variables['X'])
+        'vf_map':vf_map.vector_field_diff(control_variables['X'], ref_line)
         }
     return measure

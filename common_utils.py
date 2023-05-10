@@ -67,15 +67,15 @@ def init_planner(args, cfg, predictor):
     if args.use_planning:
         if cfg['planner']['name'] == 'dipp':
             trajectory_len, feature_len = 50, 9
-            planner = MotionPlanner(trajectory_len, feature_len, device= args.device)
+            planner = MotionPlanner(trajectory_len, feature_len, device= args.device, test=~predictor.training)
         if cfg['planner']['name'] == 'risk':
-            planner = RiskMapPlanner(predictor.meter2risk, device= args.device)
+            planner = RiskMapPlanner(predictor.meter2risk, device= args.device, test=~predictor.training)
         if cfg['planner']['name'] == 'base':
-            planner = BasePlanner(device= args.device)
+            planner = BasePlanner(device= args.device, test=~predictor.training)
         if cfg['planner']['name'] == 'esp':
-            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device)
+            planner = EularSamplingPlanner(predictor.meter2risk, device= args.device, test=~predictor.training)
         if cfg['planner']['name'] == 'nmp':
-            planner = CostMapPlanner(predictor.meter2risk, device=args.device)
+            planner = CostMapPlanner(predictor.meter2risk, device=args.device, test=~predictor.training)
     else:
         planner = None
     return planner

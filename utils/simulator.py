@@ -62,7 +62,7 @@ class Simulator(DataProcess):
         
         # update sdc state
         velocity = (xy[0] - self.sdc_state[:2]) / 0.1
-        heading = wrap_to_pi(plan[0, 2]) + self.sdc_state[2]
+        heading = plan[0,2].clip(-0.1, 0.1) + self.sdc_state[2]
         self.sdc_state = np.concatenate([xy[0], [heading], velocity, self.sdc_state[-3:]])
         self.sdc_trajectory.append(self.sdc_state[:3]) # model past trajectory
         self.sdc_gt_trajectory.append(self.sdc_route[self.timestep]) # ground truth trajectory

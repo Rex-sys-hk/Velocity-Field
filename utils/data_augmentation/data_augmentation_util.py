@@ -156,7 +156,7 @@ class ConstrainedNonlinearSmoother:
         """Set the hard control constraints."""
         curvature_limit = 1.0 / 5.0  # 1/m
         self._optimizer.subject_to(self._optimizer.bounded(-curvature_limit, self.curvature, curvature_limit))
-        accel_limit = 4.0  # m/s^2
+        accel_limit = 5.0  # m/s^2
         self._optimizer.subject_to(self._optimizer.bounded(-accel_limit, self.accel, accel_limit))
 
     def _set_state_constraints(self) -> None:

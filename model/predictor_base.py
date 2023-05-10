@@ -1,10 +1,12 @@
+from weakref import ref
 import torch
 from torch import embedding, int64, long, nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from utils.riskmap.car import MAX_ACC, MAX_STEER
 from utils.riskmap.rm_utils import has_nan, load_cfg_here, standardize_vf, yawv2yawdxdy
-from utils.test_utils import batch_sample_check_collision
+from utils.test_utils import batch_sample_check_collision, batch_sample_check_traffic
+from utils.train_utils import project_to_cartesian_frame, project_to_frenet_frame
 
 def time_embeding(traj):
     b,s,th,d = traj.shape
@@ -250,6 +252,7 @@ class Score(nn.Module):
         self.decode = nn.Sequential(nn.Dropout(0.1), nn.Linear(512, 128), nn.ELU(), nn.Linear(128, 1))
         cfg = load_cfg_here()
         self.mode_num = cfg['model_cfg']['mode_num'] if cfg['model_cfg']['mode_num'] else 3
+        self._feature = None
 
     def forward(self, map_feature, agent_agent, agent_map):
         # pooling
@@ -262,8 +265,11 @@ class Score(nn.Module):
         feature = self.reduce(feature.detach())
         feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
         scores = self.decode(feature).squeeze(-1)
-
+        self._feature = feature
         return scores
+    
+    def get_feature(self):
+        return self._feature
     
 class PreABC(nn.Module):
     def __init__(self, name:str = 'pre_abc', future_steps = 50, mode_num = 3, gamma = 1.) -> None:
@@ -347,10 +353,12 @@ class VFMapDecoder(nn.Module):
         self._agent_agent = latent_feature['agent_agent']
         # self._masks = masks[:,0]
 
-    def forward(self, sample):
+    def forward(self, sample, refline = None):
         # cross attention of self.grid and map_feature
         # TODO : add time embedding here
         b,s,th,d = sample.shape
+        if refline is not None:
+            sample = project_to_frenet_frame(sample[...,:2].reshape(b,-1,2), refline)
         query = time_embeding(sample[...,:2]) if self.time_embedding else sample[...,:2]
         query = self.emb(query.reshape(b,-1,self.time_embdim))
         map_feature = self._map_feature.view(self._map_feature.shape[0], -1, self._map_feature.shape[-1])
@@ -359,8 +367,8 @@ class VFMapDecoder(nn.Module):
         agent_map = torch.amax(self._agent_map, dim=-2)
 
         feature = torch.cat([map_feature, agent_agent], dim=-1)
-        feature = self.reduce(feature.detach())
-        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map.detach()], dim=-1)
+        feature = self.reduce(feature)
+        feature = torch.cat([feature.unsqueeze(1).repeat(1, self.mode_num, 1), agent_map], dim=-1)
         feature = self.map_feat_emb(feature)
         x,_ = self.cross_attention(query,
                                    feature,
@@ -368,6 +376,11 @@ class VFMapDecoder(nn.Module):
                                 #    key_padding_mask = self._masks
                                    )
         dx_dy = self.transformer(x)
+        if refline is not None:
+            states = torch.cat([sample[...,:2],
+                                torch.zeros_like(sample[...,:1]),
+                                dx_dy],dim=-1)
+            dx_dy = project_to_cartesian_frame(states, refline, with_yaw=True)[...,3:5]
         return dx_dy
     
     def disable_grad(self):
@@ -401,9 +414,9 @@ class VectorField(nn.Module):
         x,y = torch.meshgrid(s,l,indexing='xy')
         self.grid_points = torch.stack([x,y],dim=-1).reshape(1, -1, 2)
     
-    def plot(self, samples):
+    def plot(self, samples, refline):
         b,s,t,d = samples.shape
-        sample_dx_dy = self.vf_inquery(samples[...,:2])#.reshape(b,s,t,2)
+        sample_dx_dy = self.vf_inquery(samples[...,:2], refline)#.reshape(b,s,t,2)
         sample_dx_dy, m = standardize_vf(sample_dx_dy)
         plt.quiver(samples.reshape(b,-1,d)[0,::7,0].cpu().detach(), 
             samples.reshape(b,-1,d)[0,::7,1].cpu().detach(),
@@ -418,7 +431,7 @@ class VectorField(nn.Module):
             scale_units='inches',
             )
         # vis vector field at time 0
-        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1).unsqueeze(-2))[0]
+        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1).unsqueeze(-2), refline)[0]
         dx_dy, m = standardize_vf(dx_dy)
         plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
                    self.grid_points[0,...,1].cpu().detach(),
@@ -464,7 +477,7 @@ class VectorField(nn.Module):
         # get dx_dy
         query = torch.cat([gt[...,:2],sample[...,:2]],dim=1)
         b,s,t,d = query.shape
-        dx_dy = self.vf_inquery(query[...,:2]).reshape(b,s,t,2)
+        dx_dy = self.vf_inquery(query[...,:2], context['ref_line_info']).reshape(b,s,t,2)
         dx_dy_gt = dx_dy[:,0:1]#.clamp(max = 30, min = 0)
         dx_dy_samp = dx_dy[:,1:]
         # dx_dy_grid = self.vf_inquery(self.grid_points.to(sample.device).repeat(sample.shape[0],1,1))
@@ -487,34 +500,37 @@ class VectorField(nn.Module):
                                                      context['predictions'], 
                                                      context['current_state'][:, :, 5:],
                                                      t_stamp=True)
-            nearest_sample[collision][...,3:5] = 0.#-nearest_sample[collision][...,3:5]
+            red_light, offroute = batch_sample_check_traffic(nearest_sample, 
+                                                             context['ref_line_info'], 
+                                                             t_stamp=True)
         # core vf map construction loss  
         nearest_dis = gt[...,:3]-nearest_sample[...,:3]
         discount = torch.exp(-0.5*torch.norm(nearest_dis, dim=-1, keepdim=True)**2)
-        correction = nearest_dis[...,:2]/0.1 # dt
+        correction = gt[...,1:, :2]-nearest_sample[..., :-1, :2]
+        correction = torch.cat([correction,correction[...,-1:,:]],dim=-2)
+        correction = correction/0.1
         correction_discount = torch.exp(-0.5*torch.norm(nearest_dis[...,:2], dim=-1, keepdim=True)**2)
-        # loss += torch.nn.functional.smooth_l1_loss(dx_dy_nearest, 
-        #                                             correction+discount*nearest_sample[...,3:5])
-        loss += (correction_discount \
-                *torch.norm(
-                dx_dy_nearest-(correction+discount*nearest_sample[...,3:5]), 
-                dim=-1, 
-                keepdim=True)
-            ).mean()
+        loss += (correction_discount*(dx_dy_nearest-correction)**2).mean()
+        loss += (discount*(dx_dy_nearest-nearest_sample[...,3:5])**2).mean()
+        if context:
+            loss += (dx_dy_nearest*collision.unsqueeze(-1)).norm(dim=-1).mean()
+            loss += (dx_dy_nearest*red_light.unsqueeze(-1)).norm(dim=-1).mean()
+            loss += (dx_dy_nearest*offroute.unsqueeze(-1)).norm(dim=-1).mean()
         return loss
     
-    def vector_field_diff(self, traj):
+    def vector_field_diff(self, traj, refline):
         b,s,t,d = traj.shape
         if d != 4:
             raise ValueError('Trajectory should be in shape of (batch, sample, time, 4)')
         traj_dxy = torch.stack([torch.cos(traj[...,2])*traj[...,3],
                             torch.sin(traj[...,2])*traj[...,3]],
                             dim=-1)
-        dx_dy = self.vf_inquery(traj).reshape(b,s,t,2)
-        diff = traj_dxy - dx_dy
-        diff = torch.abs(diff)
-        # diff = torch.nn.functional.smooth_l1_loss(diff, torch.zeros_like(diff), reduction='none')
-        return diff
+        dx_dy = self.vf_inquery(traj, refline).reshape(b,s,t,2)
+        # top = (traj_dxy[...,0:1]*dx_dy[...,0:1] + dx_dy[...,1:2]*traj_dxy[...,1:2]) # cossin similarity
+        c_dis = (dx_dy-traj_dxy)**2 # squared euclidean distance
+        # bottum = torch.norm(dx_dy,dim=-1,keepdim=True)*torch.norm(traj_dxy, dim=-1, keepdim=True)
+        # c_dis = c_dis/bottum.clamp(min=1e-2)
+        return c_dis
     
     def disable_grad(self):
         self.vf_inquery.disable_grad()

@@ -58,12 +58,12 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
         # plan_trajs, predictions, scores, cost_function_weights = predictor(ego, neighbors, map_lanes, map_crosswalks)
         # us = torch.stack([get_u_from_X(plan_trajs[:,i], ego[:,-1]) for i in range(cfg['model_cfg']['mode_num'])], dim=1).clone().detach()
         loss, best_mode = MFMA_loss(plan_trajs, predictions, scores, ground_truth, masks, use_planning) # multi-future multi-agent loss
-        u, prediction = select_future(us, predictions, best_mode)
-        init_guess, prediction = select_future(plan_trajs, predictions, best_mode)
+        u, prediction = select_future(us, predictions, best_mode=best_mode)
+        init_guess, prediction = select_future(plan_trajs, predictions, best_mode=best_mode)
         # TODO GT smoother
         # plan
         if not use_planning:
-            plan, prediction = select_future(plan_trajs, predictions, best_mode)
+            plan, prediction = select_future(plan_trajs, predictions, best_mode=best_mode)
         ## BASELINE
         elif planner.name=='base':
             loss += imitation_loss(init_guess, ground_truth)
@@ -168,7 +168,7 @@ def train_epoch(data_loader, predictor: Predictor, planner: Planner, optimizer, 
                 if planner.name in ['risk']:
                     vf_map:VectorField = predictor.module.vf_map if distributed else predictor.vf_map
                     with torch.no_grad():
-                        vf_map.plot(planner.sample_plan['X'][:,::10])
+                        vf_map.plot(planner.sample_plan['X'][:,::10], ref_line_info)
                         # vf_map.plot_gt(ground_truth[...,0:1,:,:],planner.gt_sample['X'][0:1])
                 if planner.name in ['nmp']:
                     cost_map:STCostMap = predictor.module.cost_volume if distributed else predictor.cost_volume
