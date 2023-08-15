@@ -1,3 +1,4 @@
+from textwrap import wrap
 import numpy as np
 import tensorflow as tf
 from data_process import DataProcess
@@ -11,8 +12,8 @@ import matplotlib.pyplot as plt
 class Simulator(DataProcess):
     def __init__(self, timespan):
         self.cfg = load_cfg_here()
-        self.plan_sample_num = self.cfg['planner']['plan_sample_num']
-        self.lattice_sampler = self.cfg['planner']['lattice_sampler']
+        self.plan_sample_num = self.cfg['planner']['plan_sample_num'] if 'plan_sample_num' in self.cfg['planner'] else 0
+        self.lattice_sampler = self.cfg['planner']['lattice_sampler'] if 'lattice_sampler' in self.cfg['planner'] else False
         self.num_neighbors = 10
         self.hist_len = 20
         self.future_len = 50
@@ -62,7 +63,7 @@ class Simulator(DataProcess):
         
         # update sdc state
         velocity = (xy[0] - self.sdc_state[:2]) / 0.1
-        heading = plan[0,2].clip(-0.1, 0.1) + self.sdc_state[2]
+        heading = plan[0,2] + self.sdc_state[2]
         self.sdc_state = np.concatenate([xy[0], [heading], velocity, self.sdc_state[-3:]])
         self.sdc_trajectory.append(self.sdc_state[:3]) # model past trajectory
         self.sdc_gt_trajectory.append(self.sdc_route[self.timestep]) # ground truth trajectory
@@ -201,7 +202,7 @@ class Simulator(DataProcess):
 
         return error, human
 
-    def render(self, custom = None):
+    def render(self, **kwargs):
         plt.ion()
         ax = plt.gca()
         fig = plt.gcf()
@@ -219,10 +220,10 @@ class Simulator(DataProcess):
             polyline = map_process(vector, vector_type)
 
         # sdc
-        agent_color = ['r', 'm', 'b', 'g'] # [sdc, vehicle, pedestrian, cyclist]
+        agent_color = ['cyan', 'yellow', 'deepskyblue', 'steelblue'] # [sdc, vehicle, pedestrian, cyclist]
         color = agent_color[0]
         rect = plt.Rectangle((self.sdc_state[0]-self.sdc_state[-3]/2, self.sdc_state[1]-self.sdc_state[-2]/2), 
-                              self.sdc_state[-3], self.sdc_state[-2], linewidth=2, color=color, alpha=0.8, zorder=3,
+                              self.sdc_state[-3], self.sdc_state[-2], linewidth=2, color=color, alpha=0.7, zorder=3,
                               transform=mpl.transforms.Affine2D().rotate_around(*(self.sdc_state[0], self.sdc_state[1]), self.sdc_state[2]) + ax.transData)
         ax.add_patch(rect)
         ax.plot(self.plan[::7, 0], self.plan[::7, 1], linewidth=2, color=color, marker='.', markersize=6, zorder=4)
@@ -234,23 +235,44 @@ class Simulator(DataProcess):
             state = neighbor[1]
             color = agent_color[type]
             rect = plt.Rectangle((state.center_x-state.length/2, state.center_y-state.width/2), 
-                                  state.length, state.width, linewidth=2, color=color, alpha=0.7, zorder=3,
+                                  state.length, state.width, linewidth=2, color=color, alpha=0.5, zorder=3,
                                   transform=mpl.transforms.Affine2D().rotate_around(*(state.center_x, state.center_y), state.heading) + ax.transData)
             ax.add_patch(rect)
             ax.plot(self.prediction[i][::7, 0], self.prediction[i][::7, 1], linewidth=2, color=color, marker='.', markersize=6, zorder=3)        
 
         for i, neighbor in enumerate(self.neighbors_states['background_neighbors']):
             rect = plt.Rectangle((neighbor.center_x-neighbor.length/2, neighbor.center_y-neighbor.width/2), 
-                                  neighbor.length, neighbor.width, linewidth=2, color='k', alpha=0.6, zorder=3,
+                                  neighbor.length, neighbor.width, linewidth=2, color='k', alpha=0.5, zorder=3,
                                   transform=mpl.transforms.Affine2D().rotate_around(*(neighbor.center_x, neighbor.center_y), neighbor.heading) + ax.transData)
             ax.add_patch(rect)
 
         # dynamic_map_states
         for signal in self.dynamic_map_states[self.timestep].lane_states:
             traffic_signal_process(self.lanes, signal)
-
-        # show plot
-        ax.axis([-100 + self.sdc_state[0], 100 + self.sdc_state[0], -100 + self.sdc_state[1], 100 + self.sdc_state[1]])
+        ## visualize vector field map
+        if kwargs['show_vf_map']:
+            predictor, planner = kwargs['predictor'], kwargs['planner']
+            if planner.name == 'risk':
+                predictor.vf_map.plot(planner.sample_plan['X'],
+                                    planner.context['ref_line_info'], 
+                                    ax=ax, 
+                                    vis_grid=False,
+                                    vis_sample=True,
+                                    global_cor=[self.sdc_state[0], self.sdc_state[1], self.sdc_state[2]])
+        ## corp canvas
+        patch_sz = 60
+        ax.axis([-patch_sz + self.sdc_state[0], patch_sz + self.sdc_state[0], -patch_sz + self.sdc_state[1], patch_sz + self.sdc_state[1]])
+        ## show time step
+        ax.text(1,0,f'Time = {(self.timestep-19)/10}s', 
+                fontsize=20,  
+                wrap=True, 
+                transform=ax.transAxes, 
+                zorder=6, 
+                backgroundcolor='k', 
+                color='w',
+                horizontalalignment='right',
+                verticalalignment='bottom', 
+                )
         ax.set_aspect('equal')
         ax.grid(False)
         ax.margins(0) 

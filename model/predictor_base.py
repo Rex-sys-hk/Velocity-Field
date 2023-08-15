@@ -414,37 +414,92 @@ class VectorField(nn.Module):
         x,y = torch.meshgrid(s,l,indexing='xy')
         self.grid_points = torch.stack([x,y],dim=-1).reshape(1, -1, 2)
     
-    def plot(self, samples, refline):
+    def plot(self, samples, refline, ax=None, global_cor=[0,0,0], vis_grid = True, vis_sample =True): #TODO add scaler version vis
         b,s,t,d = samples.shape
-        sample_dx_dy = self.vf_inquery(samples[...,:2], refline)#.reshape(b,s,t,2)
-        sample_dx_dy, m = standardize_vf(sample_dx_dy)
-        plt.quiver(samples.reshape(b,-1,d)[0,::7,0].cpu().detach(), 
-            samples.reshape(b,-1,d)[0,::7,1].cpu().detach(),
-            sample_dx_dy[0,::7,0].cpu().detach(),
-            sample_dx_dy[0,::7,1].cpu().detach(),
-            label=f'Plan Sampled Vector, max={m}',
-            width=0.001,
-            scale = 5,
-            color='red',
-            zorder=1,
-            alpha=0.2,
-            scale_units='inches',
-            )
-        # vis vector field at time 0
-        dx_dy = self.vf_inquery(self.grid_points.to(samples.device).repeat(samples.shape[0],1,1).unsqueeze(-2), refline)[0]
-        dx_dy, m = standardize_vf(dx_dy)
-        plt.quiver(self.grid_points[0,...,0].cpu().detach(), 
-                   self.grid_points[0,...,1].cpu().detach(),
-                   dx_dy[...,0].cpu().detach(),
-                   dx_dy[...,1].cpu().detach(),
-                   label=f'Vis Vector Field, max={m}',
-                   width=0.001,
-                   scale = 5,
-                   color='k',
-                   zorder= 1,
-                   alpha= 0.2,
-                   scale_units='inches',
-                   )
+        global_cor = torch.tensor(global_cor).to(samples.device)
+        if vis_sample:
+            sample_dx_dy = self.vf_inquery(samples[...,:3], refline)#.reshape(b,s,t,2)
+            sample_dx_dy, m = standardize_vf(sample_dx_dy)
+            r_samples = self.vec_rotate(samples, global_cor[2])+global_cor[:2]
+            r_sample_dx_dy = self.vec_rotate(sample_dx_dy, global_cor[2])
+            if self.scaler_cost:
+                plt.gca().scatter(r_samples.reshape(b,-1,2)[0,::7,0].cpu().detach(), 
+                r_samples.reshape(b,-1,2)[0,::7,1].cpu().detach(),
+                # r_sample_dx_dy[0,::7,0].cpu().detach(),
+                # r_sample_dx_dy[0,::7,1].cpu().detach(),
+                c = (-r_sample_dx_dy.reshape(b,-1,2)[0, ::7,:2]).clamp(-100,100).sum(dim=-1).cpu().detach(),
+                label=f'Plan Sampled Cost Map',
+                # width=0.002,
+                # scale = 15,
+                # color='mediumaquamarine',
+                zorder=2,
+                alpha=0.2,
+                # scale_units='inches',
+                )
+            else:
+                plt.gca().quiver(
+                    r_samples.reshape(b,-1,2)[0,::7,0].cpu().detach(), 
+                    r_samples.reshape(b,-1,2)[0,::7,1].cpu().detach(),
+                    r_sample_dx_dy.reshape(b,-1,2)[0,::7,0].cpu().detach(),
+                    r_sample_dx_dy.reshape(b,-1,2)[0,::7,1].cpu().detach(),
+                    label=f'Plan Sampled Vector, max={m}',
+                    width=0.002,
+                    scale = 15,
+                    color='mediumaquamarine',
+                    zorder=2,
+                    alpha=0.2,
+                    scale_units='inches',
+                    )
+                # plt.gca().scatter(r_samples.reshape(b,-1,2)[0,::7,0].cpu().detach(),
+                #     r_samples.reshape(b,-1,2)[0,::7,1].cpu().detach(),
+                #     c = self.vec2rgb(r_sample_dx_dy)[0,::7].reshape(-1,3),
+                #     label=f'Plan Sampled Vector, max={m}',
+                #     zorder=2,
+                #     alpha=0.8,
+                #     )
+        if vis_grid:
+            # vis vector field at time 0
+            grid_points = self.grid_points.to(samples.device).repeat(samples.shape[0],1,1).unsqueeze(-2)
+            dx_dy = self.vf_inquery(grid_points, refline)[0]
+            dx_dy, m = standardize_vf(dx_dy)
+            r_grid_points = self.vec_rotate(grid_points, global_cor[2])+global_cor[:2]
+            r_dx_dy = self.vec_rotate(dx_dy, global_cor[2])
+            if self.scaler_cost:
+                plt.gca().scatter(r_grid_points[0,...,0].cpu().detach(), 
+                r_grid_points[0,...,1].cpu().detach(),
+                # r_dx_dy[...,0].cpu().detach(),
+                # r_dx_dy[...,1].cpu().detach(),
+                c =(-r_dx_dy[...,:2]).clamp(-100,100).sum(dim=-1).cpu().detach(),
+                label=f'Plan Sampled Cost Map',
+                # width=0.002,
+                # scale = 15,
+                # color='mediumaquamarine',
+                zorder=2,
+                alpha=0.2,
+                s= 0.5,
+                # scale_units='inches',
+                )
+            else:
+                # plt.gca().quiver(r_grid_points[0,...,0].cpu().detach(), 
+                #         r_grid_points[0,...,1].cpu().detach(),
+                #         r_dx_dy[...,0].cpu().detach(),
+                #         r_dx_dy[...,1].cpu().detach(),
+                #         label=f'Vis Vector Field, max={m}',
+                #         width=0.002,
+                #         scale = 15,
+                #         color='k',
+                #         zorder= 1,
+                #         alpha= 0.2,
+                #         scale_units='inches',
+                #         )
+                plt.gca().scatter(r_grid_points[0,...,0].cpu().detach(),
+                    r_grid_points[0,...,1].cpu().detach(),
+                    c = self.vec2rgb(r_dx_dy).reshape(-1,3),
+                    label=f'Vis Vector Field, max={m}',
+                    zorder=0,
+                    alpha=0.5,
+                    s=0.5
+                    )
         
     def plot_gt(self, gt, samples):
         diff_sample_gt = 0

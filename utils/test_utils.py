@@ -80,21 +80,21 @@ def map_process(map_feature, map_type):
         polyline = np.array([(map_point.x, map_point.y) for map_point in map_feature.polyline], dtype=np.float32)
 
         if map_feature.type == 1:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='dashed', linewidth=2)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='dashed', linewidth=1.5)
         elif map_feature.type == 2:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='solid', linewidth=2)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='solid', linewidth=1.5)
         elif map_feature.type == 3:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='solid', linewidth=3)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'w', linestyle='solid', linewidth=2)
         elif map_feature.type == 4:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dashed', linewidth=2)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dashed', linewidth=1.5)
         elif map_feature.type == 5:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dashed', linewidth=3)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dashed', linewidth=2)
         elif map_feature.type == 6:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='solid', linewidth=2)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='solid', linewidth=1.5)
         elif map_feature.type == 7:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='solid', linewidth=3)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='solid', linewidth=2)
         elif map_feature.type == 8:
-            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dotted', linewidth=2)
+            plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:yellow', linestyle='dotted', linewidth=1.5)
         else:
             plt.plot(polyline[:, 0], polyline[:, 1], 'k', linewidth=1)
 
@@ -120,13 +120,14 @@ def map_process(map_feature, map_type):
 
     elif map_type == 'crosswalk':
         polyline = polygon_completion(map_feature.polygon).astype(np.float32)
-        plt.plot(polyline[:, 0], polyline[:, 1], 'b', linewidth=4)
+        plt.gca().add_artist(plt.Polygon(polyline[:, :2], facecolor='whitesmoke', linewidth=0, fill=True, alpha=0.3))
 
         return polyline
 
     elif map_type == 'speed_bump':
         polyline = polygon_completion(map_feature.polygon).astype(np.float32)
-        plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:orange', linewidth=4)
+        plt.gca().add_artist(plt.Polygon(polyline[:, :2], facecolor='lightgrey', linewidth=0, fill=True, alpha=0.3))
+        # plt.plot(polyline[:, 0], polyline[:, 1], 'xkcd:orange', linewidth=4)
 
         return polyline
 
@@ -376,7 +377,7 @@ def batch_sample_check_traffic(traj, ref_line, t_stamp=False):
     if not t_stamp:
         off_route = off_route.amax(dim=[-1])
         red_light = red_light.amax(dim=[-1])
-    return red_light, off_route
+    return red_light.bool(), off_route.bool()
 
 def check_similarity(traj, gt):
     error = np.linalg.norm(traj[:, :2] - gt[:, :2], axis=-1)
@@ -417,3 +418,20 @@ def batch_check_prediction(trajs, gt):
     # predictorFDE = torch.mean(predictorFDE, dim=-1)
 
     return predictorADE, predictorFDE
+
+def check_rule(sample, context, t_stamp = False, inf_result = False, rv_cost = 1e3, check_item = []):
+    rule_violation = False
+    if 'collision' in check_item:
+        collide = batch_sample_check_collision(sample, context['predictions'], context['current_state'][..., 5:], t_stamp=t_stamp)
+        rule_violation += collide.bool()
+    if 'trafficlight' in check_item or 'offroad' in check_item:
+        red_light, offroute = batch_sample_check_traffic(sample,  context['ref_line_info'], t_stamp=t_stamp)
+    if 'trafficlight' in check_item:
+        rule_violation += red_light.bool()
+    if 'offroad' in check_item:
+        rule_violation += offroute.bool()
+    if not inf_result:
+        return rule_violation
+    rule_violation = rule_violation.unsqueeze(-1).unsqueeze(-1)*rv_cost
+    rule_violation = torch.nan_to_num(rule_violation, nan=0.)
+    return rule_violation

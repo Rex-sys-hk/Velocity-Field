@@ -14,6 +14,7 @@ from waymo_open_dataset.protos import scenario_pb2
 import ray
 import math
 import glob
+from utils.train_utils import set_seed
 os.environ["DIPP_ABS_PATH"] = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.getenv('DIPP_ABS_PATH'))
 
@@ -64,6 +65,7 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
 
             obs = simulator.reset()
             done = False
+            TL = False
             if type(obs) == type(None):
                 continue
             while not done:
@@ -89,16 +91,17 @@ def closed_loop_test(test_pkg_sid=0, test_pkg_eid=100, pid=0):
                     prediction = np.zeros([10,50,3])#simulator.sdc_prediction
                 # take one step
                 obs, done, info = simulator.step(plan_traj, prediction)
-                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}, traffic_light: {info[2]}')
+                TL = info[2] if TL==False else TL
+                logging.info(f'Collision: {info[0]}, Off-route: {info[1]}, traffic_light: {TL}')
 
                 # render
                 if args.render:
-                    simulator.render(predictor)
+                    simulator.render(predictor=predictor, planner=planner, show_vf_map=args.show_vf_map)
 
             # calculate metrics
             collisions.append(info[0])
             off_routes.append(info[1])
-            traffic_light.append(info[2])
+            traffic_light.append(TL)
             progress.append(simulator.calculate_progress())
 
             dynamics = simulator.calculate_dynamics()
@@ -156,11 +159,14 @@ if __name__ == "__main__":
     parser.add_argument('--smoothing', type=str, help='enable after smoothingm include(default: none), single, mt, mp', default='none')
     parser.add_argument('--gt_replay', action="store_true", help='if replay ground truth (default: False)', default=False)
     parser.add_argument('--opt_plan', action="store_true", help='enable optimization based planning', default=False)
+    parser.add_argument('--rand_seed', type=int, help='optimization based planning steps', default=3407)
+    parser.add_argument('--show_vf_map', action="store_true", help='show cost/velocity map in render process', default=False)
     
     args = parser.parse_args()
     cfg_file = args.config if args.config else 'config.yaml'
     os.environ["DIPP_CONFIG"] = str(os.getenv('DIPP_ABS_PATH') + '/' + cfg_file)
     cfg = load_cfg_here()
+    set_seed(args.rand_seed)
     # Run
     files = glob.glob(args.test_set+'/*')[args.test_pkg_sid:args.test_pkg_sid+args.test_pkg_num]
     num_files = len(files)
