@@ -1,5 +1,5 @@
-# RiskMap
-Source code will be published after review. 
+# README
+The source code will be published later. 
 
 <!-- ![Alt Text](https://media.giphy.com/media/vFKqnCdLPNOKc/giphy.gif) -->
 
